@@ -12,6 +12,7 @@ import "./style.css";
 import { fetchTeam, openStream, submitTask, sessionId, TeamMemberInfo, StreamEvent } from "./api.js";
 import { initScene, SceneHandle } from "./scene.js";
 import { registerWebMCP, TOOLS } from "./webmcp.js";
+import { renderMarkdown } from "./markdown.js";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -114,7 +115,7 @@ function appendDelta(taskId: string, text: string) {
 function finishBubble(taskId: string, companion: string, result: string) {
   const live = liveBubbles.get(taskId);
   if (live) {
-    live.bubble.textContent = result; // authoritative final text
+    live.bubble.innerHTML = renderMarkdown(result); // authoritative final text, formatted
     liveBubbles.delete(taskId);
   } else {
     startCompanionBubble(taskId, companion);
