@@ -241,10 +241,30 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
 
   /* ---------- board ring: one mote per item, orbiting tight around the core ---------- */
   const BOARD_COLORS: Record<string, THREE.Color> = {
-    todo: new THREE.Color(0x8f88ad),
+    todo: new THREE.Color(0xbfb6ea),
     doing: new THREE.Color(0xf5d9a8),
     done: new THREE.Color(0x35e0c4),
   };
+
+  // Points render as hard SQUARES without a map — fine for dust-sized
+  // particles, ugly for big lone motes. A radial-gradient sprite turns
+  // them into soft glowing orbs.
+  function makeMoteTexture(): THREE.CanvasTexture {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d")!;
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gradient.addColorStop(0, "rgba(255,255,255,1)");
+    gradient.addColorStop(0.35, "rgba(255,255,255,0.85)");
+    gradient.addColorStop(0.7, "rgba(255,255,255,0.25)");
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(canvas);
+  }
+  const moteTexture = makeMoteTexture();
+
   let boardPoints: THREE.Points | null = null;
   let boardStatuses: string[] = [];
 
@@ -277,14 +297,15 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-    // a lone item near the bright core is easy to lose — give small boards
-    // a size boost so the first couple of items are unmistakable
-    const moteSize = n <= 2 ? 0.75 : n <= 5 ? 0.6 : 0.48;
+    // soft-edged sprites read ~half the size of solid squares — compensate,
+    // and keep small boards extra prominent so the first item is unmissable
+    const moteSize = n <= 2 ? 1.5 : n <= 5 ? 1.2 : 0.95;
 
     boardPoints = new THREE.Points(
       geometry,
       new THREE.PointsMaterial({
         size: moteSize,
+        map: moteTexture,
         vertexColors: true,
         transparent: true,
         opacity: 1,
