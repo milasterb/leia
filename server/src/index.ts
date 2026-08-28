@@ -115,7 +115,11 @@ app.get("/api/stream", (req, res) => {
   const unsubscribe = subscribe(sessionId, (e) => {
     res.write(`data: ${JSON.stringify(e)}\n\n`);
   });
-  const heartbeat = setInterval(() => res.write(`: ping\n\n`), 25_000);
+  // A real "data:" message, not a bare SSE comment — comments are invisible
+  // to EventSource.onmessage, so the client has no way to notice a
+  // connection that's silently hung (no error, just stopped delivering)
+  // unless the heartbeat itself is something it can observe.
+  const heartbeat = setInterval(() => res.write(`data: {"type":"ping"}\n\n`), 25_000);
 
   req.on("close", () => {
     clearInterval(heartbeat);

@@ -184,20 +184,32 @@ export function openStream(
 ): () => void {
   let source: EventSource | null = null;
   let closed = false;
+  let lastMessageAt = Date.now();
+  let watchdog = 0;
+
+  // The server heartbeats every 25s. If nothing — not even a heartbeat —
+  // has arrived in a while, the connection has likely gone silently dead
+  // (some proxies drop idle connections without ever firing onerror, so
+  // the browser thinks it's still "open"). Force a reconnect rather than
+  // trusting onerror alone.
+  const WATCHDOG_TIMEOUT_MS = 65_000;
 
   const connect = () => {
     if (closed) return;
+    lastMessageAt = Date.now();
     source = new EventSource(`${API_BASE}/api/stream?session=${sessionId()}`);
     source.onopen = () => onState("open");
     source.onmessage = (ev) => {
-      let event: StreamEvent;
+      lastMessageAt = Date.now();
+      let event: StreamEvent | { type: "ping" };
       try {
-        event = JSON.parse(ev.data) as StreamEvent;
+        event = JSON.parse(ev.data);
       } catch {
         return; // malformed frame — ignore
       }
+      if (event.type === "ping") return; // heartbeat only — nothing to render
       try {
-        onEvent(event);
+        onEvent(event as StreamEvent);
       } catch (err) {
         console.warn("Leia: event handler failed on", event.type, err);
       }
@@ -210,8 +222,18 @@ export function openStream(
   };
 
   connect();
+  clearInterval(watchdog);
+  watchdog = window.setInterval(() => {
+    if (!closed && Date.now() - lastMessageAt > WATCHDOG_TIMEOUT_MS) {
+      onState("down");
+      source?.close();
+      connect();
+    }
+  }, 15_000);
+
   return () => {
     closed = true;
+    clearInterval(watchdog);
     source?.close();
   };
 }
