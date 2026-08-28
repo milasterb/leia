@@ -268,6 +268,14 @@ app.post("/api/board/delegate", async (req, res) => {
   if (!item) {
     return res.status(404).json({ error: `No board item "${id}". Use list_board to see current ids.` });
   }
+  // an item already being worked stays untouched — without this, two quick
+  // clicks (or a human and an agent both reaching for the same item) would
+  // fire two paid API calls for the same piece of work and race on the write
+  if (item.status === "doing") {
+    return res.status(409).json({
+      error: `[${id}] "${item.title}" is already being worked on. Wait for it to finish before delegating again.`,
+    });
+  }
 
   const gate = tryAcquire(sessionId);
   if (!gate.ok) return res.status(429).json({ error: gate.reason });
