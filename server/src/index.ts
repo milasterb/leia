@@ -208,7 +208,6 @@ app.post("/api/board", (req, res) => {
   let result: ReturnType<typeof addBoardItem>;
   if (action === "add") {
     if (typeof title !== "string") return res.status(400).json({ error: "title required" });
-    agentPing(sessionId, viaClean, tool ?? "add_board_item", `added to board: "${String(title).slice(0, 60)}"`);
     result = addBoardItem(sessionId, {
       title,
       note: typeof note === "string" ? note : undefined,
@@ -217,7 +216,6 @@ app.post("/api/board", (req, res) => {
     });
   } else if (action === "update") {
     if (typeof id !== "string") return res.status(400).json({ error: "id required" });
-    agentPing(sessionId, viaClean, tool ?? "update_board_item", `updated ${id}${status ? ` → ${status}` : ""}`);
     result = updateBoardItem(sessionId, id, {
       title: typeof title === "string" ? title : undefined,
       note: typeof note === "string" ? note : undefined,
@@ -225,13 +223,23 @@ app.post("/api/board", (req, res) => {
     });
   } else if (action === "remove") {
     if (typeof id !== "string") return res.status(400).json({ error: "id required" });
-    agentPing(sessionId, viaClean, tool ?? "remove_board_item", `removed ${id} from the board`);
     result = removeBoardItem(sessionId, id);
   } else {
     return res.status(400).json({ error: `Unknown action "${action}". Use add, update or remove.` });
   }
 
+  // ping AFTER the mutation is confirmed to have actually happened — an
+  // agentPing before this point would tell the human's feed a write
+  // succeeded even when validation rejected it (e.g. bad id, empty title)
   if ("error" in result) return res.status(400).json({ error: result.error });
+
+  if (action === "add") {
+    agentPing(sessionId, viaClean, tool ?? "add_board_item", `added to board: "${result.title.slice(0, 60)}"`);
+  } else if (action === "update") {
+    agentPing(sessionId, viaClean, tool ?? "update_board_item", `updated [${result.id}]${status ? ` → ${result.status}` : ""}`);
+  } else {
+    agentPing(sessionId, viaClean, tool ?? "remove_board_item", `removed [${result.id}] from the board`);
+  }
 
   broadcastBoard(sessionId, {
     id: result.id,
