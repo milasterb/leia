@@ -266,24 +266,28 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
       colors[i * 3] = c.r;
       colors[i * 3 + 1] = c.g;
       colors[i * 3 + 2] = c.b;
-      // real positions are refreshed every frame in animate(); initialize on
-      // the ring so the first rendered frame is already correct
+      // positions are set per-frame in animate(); initialize on the ring so
+      // the first rendered frame is already correct
       const a = (i / n) * Math.PI * 2;
-      positions[i * 3] = Math.cos(a) * 7.2;
-      positions[i * 3 + 1] = Math.sin(a * 2) * 0.4;
-      positions[i * 3 + 2] = Math.sin(a) * 7.2;
+      positions[i * 3] = Math.cos(a) * 10.5;
+      positions[i * 3 + 1] = Math.sin(a * 2) * 0.6;
+      positions[i * 3 + 2] = Math.sin(a) * 10.5;
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
+    // a lone item near the bright core is easy to lose — give small boards
+    // a size boost so the first couple of items are unmistakable
+    const moteSize = n <= 2 ? 0.75 : n <= 5 ? 0.6 : 0.48;
+
     boardPoints = new THREE.Points(
       geometry,
       new THREE.PointsMaterial({
-        size: 0.42,
+        size: moteSize,
         vertexColors: true,
         transparent: true,
-        opacity: 0.95,
+        opacity: 1,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       })
@@ -382,7 +386,7 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
       node.cloud.scale.setScalar(pulse);
     }
 
-    // board ring — slow orbit around the core; "doing" motes shimmer
+    // board ring — slow orbit around the core, clear of its glow; "doing" motes shimmer
     if (boardPoints) {
       const n = boardStatuses.length;
       const attr = boardPoints.geometry.attributes.position as THREE.BufferAttribute;
@@ -391,8 +395,8 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
         const a = spin + (i / n) * Math.PI * 2;
         const doing = boardStatuses[i] === "doing";
         const wobble = doing && !REDUCED ? Math.sin(t * 5 + i) * 0.35 : 0;
-        const r = 7.2 + wobble * 0.3;
-        attr.setXYZ(i, Math.cos(a) * r, Math.sin(a * 2 + t * 0.3) * 0.5 + wobble, Math.sin(a) * r);
+        const r = 10.5 + wobble * 0.3;
+        attr.setXYZ(i, Math.cos(a) * r, Math.sin(a * 2 + t * 0.3) * 0.7 + wobble, Math.sin(a) * r);
       }
       attr.needsUpdate = true;
     }
