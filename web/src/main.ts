@@ -195,7 +195,10 @@ function renderBoard(items: BoardItem[]) {
 
     const statusBtn = document.createElement("button");
     statusBtn.className = "board-status";
-    statusBtn.title = `${item.status} — click to move to ${NEXT_STATUS[item.status]}`;
+    statusBtn.title =
+      item.status === "todo"
+        ? "todo — click to mark doing yourself (this also locks out delegating it to the team)"
+        : `${item.status} — click to move to ${NEXT_STATUS[item.status]}`;
     statusBtn.addEventListener("click", () => {
       mutateBoard({ action: "update", id: item.id, status: NEXT_STATUS[item.status], via: "human" }).catch((e) =>
         addError("local", e instanceof Error ? e.message : "Board update failed.")
@@ -222,10 +225,13 @@ function renderBoard(items: BoardItem[]) {
 
     const runBtn = document.createElement("button");
     runBtn.textContent = "⚡";
-    runBtn.title = "Send to the team (Leia routes it, outcome lands back on the item)";
     runBtn.disabled = item.status === "doing";
+    runBtn.title = runBtn.disabled
+      ? "Already marked doing — move it back to todo (click the status circle) to delegate it"
+      : "Send to the team (Leia routes it, outcome lands back on the item)";
     runBtn.addEventListener("click", () => {
       runBtn.disabled = true;
+      runBtn.title = "Sending…";
       delegateBoardItem(item.id, "human").catch((e) =>
         addError("local", e instanceof Error ? e.message : "Delegation failed.")
       );
