@@ -281,21 +281,31 @@ export const TOOLS: WebMCPTool[] = [
 ];
 
 export type WebMCPStatus =
-  | { available: true; method: "registerTool" | "provideContext" }
+  | { available: true; method: "registerTool" | "provideContext"; anchor: "navigator" | "document" }
   | { available: false };
 
+/**
+ * Where the browser puts `modelContext` has moved between preview builds
+ * (early drafts used `navigator.modelContext`; some current Chrome Canary
+ * builds expose it on `document.modelContext` instead). We check both
+ * rather than picking one, so registration keeps working across browsers
+ * without needing to track the spec's churn by hand.
+ */
 export function registerWebMCP(): WebMCPStatus {
-  const mc = (navigator as any).modelContext;
+  const navMc = (navigator as any).modelContext;
+  const docMc = (document as any).modelContext;
+  const mc = navMc ?? docMc;
   if (!mc) return { available: false };
+  const anchor: "navigator" | "document" = navMc ? "navigator" : "document";
 
   try {
     if (typeof mc.registerTool === "function") {
       for (const tool of TOOLS) mc.registerTool(tool);
-      return { available: true, method: "registerTool" };
+      return { available: true, method: "registerTool", anchor };
     }
     if (typeof mc.provideContext === "function") {
       mc.provideContext({ tools: TOOLS });
-      return { available: true, method: "provideContext" };
+      return { available: true, method: "provideContext", anchor };
     }
   } catch (e) {
     console.warn("WebMCP registration failed:", e);

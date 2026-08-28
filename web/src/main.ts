@@ -325,11 +325,12 @@ function renderAgentPanel() {
     pill.classList.add("live");
     pillText.textContent = `Agent link · ${TOOLS.length} tools live`;
     agentHint.innerHTML =
-      "WebMCP is active. Ask your agent to <code>list_companions</code> and watch the field light up.";
+      `WebMCP is active (via <code>${status.anchor}.modelContext</code>). Ask your agent to ` +
+      "<code>list_companions</code> and watch the field light up.";
   } else {
     pillText.textContent = "Agent link · inactive";
     agentHint.innerHTML =
-      "This browser doesn't expose <code>navigator.modelContext</code>. Open this page in " +
+      "This browser doesn't expose <code>modelContext</code>. Open this page in " +
       "ChatGPT's in-app browser, or enable WebMCP in Chrome (experimental flag / origin trial), " +
       "and the team becomes callable by your agent.";
   }
