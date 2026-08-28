@@ -9,7 +9,18 @@
  */
 
 import "./style.css";
-import { fetchTeam, openStream, submitTask, sessionId, TeamMemberInfo, StreamEvent } from "./api.js";
+import {
+  fetchTeam,
+  fetchBoard,
+  mutateBoard,
+  delegateBoardItem,
+  openStream,
+  submitTask,
+  sessionId,
+  TeamMemberInfo,
+  StreamEvent,
+  BoardItem,
+} from "./api.js";
 import { initScene, SceneHandle } from "./scene.js";
 import { registerWebMCP, TOOLS } from "./webmcp.js";
 import { renderMarkdown } from "./markdown.js";
@@ -142,6 +153,119 @@ function addError(taskId: string, message: string) {
   scrollFeed();
 }
 
+/* ---------------- board (shared plan) ---------------- */
+
+const boardItemsEl = $("#board-items") as HTMLDivElement;
+const boardCount = $("#board-count") as HTMLSpanElement;
+const boardComposer = $("#board-composer") as HTMLFormElement;
+const boardInput = $("#board-input") as HTMLInputElement;
+
+let lastFlashId: string | null = null;
+
+const NEXT_STATUS: Record<string, "todo" | "doing" | "done"> = {
+  todo: "doing",
+  doing: "done",
+  done: "todo",
+};
+
+function renderBoard(items: BoardItem[]) {
+  boardCount.textContent = items.length
+    ? `${items.filter((b) => b.status === "done").length}/${items.length} done`
+    : "";
+  boardItemsEl.innerHTML = "";
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "board-empty";
+    empty.textContent = "No plan yet — add an item, or let your agent lay one out.";
+    boardItemsEl.appendChild(empty);
+    scene?.setBoard([]);
+    return;
+  }
+
+  for (const item of items) {
+    const el = document.createElement("div");
+    el.className = "board-item";
+    el.dataset.status = item.status;
+    if (item.id === lastFlashId) {
+      el.classList.add("flash");
+    }
+
+    const statusBtn = document.createElement("button");
+    statusBtn.className = "board-status";
+    statusBtn.title = `${item.status} — click to move to ${NEXT_STATUS[item.status]}`;
+    statusBtn.addEventListener("click", () => {
+      mutateBoard({ action: "update", id: item.id, status: NEXT_STATUS[item.status], via: "human" }).catch((e) =>
+        addError("local", e instanceof Error ? e.message : "Board update failed.")
+      );
+    });
+
+    const textWrap = document.createElement("div");
+    textWrap.className = "board-text";
+    const title = document.createElement("div");
+    title.className = "board-item-title";
+    title.textContent = item.title;
+    title.title = item.title;
+    textWrap.appendChild(title);
+    if (item.note) {
+      const note = document.createElement("div");
+      note.className = "board-item-note";
+      note.textContent = item.note;
+      note.title = item.note;
+      textWrap.appendChild(note);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "board-actions";
+
+    const runBtn = document.createElement("button");
+    runBtn.textContent = "⚡";
+    runBtn.title = "Send to the team (Leia routes it, outcome lands back on the item)";
+    runBtn.disabled = item.status === "doing";
+    runBtn.addEventListener("click", () => {
+      runBtn.disabled = true;
+      delegateBoardItem(item.id, "human").catch((e) =>
+        addError("local", e instanceof Error ? e.message : "Delegation failed.")
+      );
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "×";
+    delBtn.title = "Remove from board";
+    delBtn.addEventListener("click", () => {
+      mutateBoard({ action: "remove", id: item.id, via: "human" }).catch((e) =>
+        addError("local", e instanceof Error ? e.message : "Remove failed.")
+      );
+    });
+
+    actions.append(runBtn, delBtn);
+
+    el.append(statusBtn, textWrap);
+    if (item.createdBy === "agent") {
+      const badge = document.createElement("span");
+      badge.className = "by-agent";
+      badge.textContent = "agent";
+      badge.title = "Added by your agent";
+      el.appendChild(badge);
+    }
+    el.appendChild(actions);
+    boardItemsEl.appendChild(el);
+  }
+
+  scene?.setBoard(items.map((b) => b.status));
+  lastFlashId = null;
+}
+
+boardComposer.addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const title = boardInput.value.trim();
+  if (!title) return;
+  boardInput.value = "";
+  mutateBoard({ action: "add", title, via: "human" }).catch((e) =>
+    addError("local", e instanceof Error ? e.message : "Could not add board item.")
+  );
+});
+
 /* ---------------- legend ---------------- */
 
 function renderLegend() {
@@ -246,6 +370,17 @@ function handleEvent(e: StreamEvent) {
     case "agent-tool":
       addAgentCall(e.tool, e.detail);
       break;
+    case "board": {
+      if (e.changed) {
+        lastFlashId = e.changed.id;
+        const who = e.changed.via === "agent" ? "agent" : "you";
+        const verb =
+          e.changed.action === "add" ? "added" : e.changed.action === "remove" ? "removed" : "updated";
+        addSystemLine(`⚑ ${who} ${verb} “${e.changed.title}” on the board`);
+      }
+      renderBoard(e.items);
+      break;
+    }
   }
 }
 
@@ -283,6 +418,9 @@ async function boot() {
 
   renderLegend();
   renderAgentPanel();
+  fetchBoard()
+    .then(renderBoard)
+    .catch(() => {}); // board comes in over SSE anyway on first change
 
   await document.fonts.ready.catch(() => {});
   scene = initScene($("#world") as HTMLCanvasElement, team);

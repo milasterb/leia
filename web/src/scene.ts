@@ -39,6 +39,7 @@ export interface SceneHandle {
   setWorking(name: string, working: boolean): void;
   beamTo(name: string): void;
   flashDone(name: string): void;
+  setBoard(statuses: string[]): void;
   dispose(): void;
 }
 
@@ -238,6 +239,58 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
     if (node) node.working = working;
   }
 
+  /* ---------- board ring: one mote per item, orbiting tight around the core ---------- */
+  const BOARD_COLORS: Record<string, THREE.Color> = {
+    todo: new THREE.Color(0x8f88ad),
+    doing: new THREE.Color(0xf5d9a8),
+    done: new THREE.Color(0x35e0c4),
+  };
+  let boardPoints: THREE.Points | null = null;
+  let boardStatuses: string[] = [];
+
+  function setBoard(statuses: string[]) {
+    boardStatuses = statuses;
+    if (boardPoints) {
+      scene.remove(boardPoints);
+      boardPoints.geometry.dispose();
+      (boardPoints.material as THREE.Material).dispose();
+      boardPoints = null;
+    }
+    if (statuses.length === 0) return;
+
+    const n = statuses.length;
+    const positions = new Float32Array(n * 3);
+    const colors = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const c = BOARD_COLORS[statuses[i]] ?? BOARD_COLORS.todo;
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+      // real positions are refreshed every frame in animate(); initialize on
+      // the ring so the first rendered frame is already correct
+      const a = (i / n) * Math.PI * 2;
+      positions[i * 3] = Math.cos(a) * 7.2;
+      positions[i * 3 + 1] = Math.sin(a * 2) * 0.4;
+      positions[i * 3 + 2] = Math.sin(a) * 7.2;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+    boardPoints = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({
+        size: 0.42,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    scene.add(boardPoints);
+  }
+
   /* ---------- camera control: drag orbit + wheel zoom + idle drift ---------- */
   let theta = 0.9;
   let phi = 1.18;
@@ -329,6 +382,21 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
       node.cloud.scale.setScalar(pulse);
     }
 
+    // board ring — slow orbit around the core; "doing" motes shimmer
+    if (boardPoints) {
+      const n = boardStatuses.length;
+      const attr = boardPoints.geometry.attributes.position as THREE.BufferAttribute;
+      const spin = REDUCED ? 0 : t * 0.12;
+      for (let i = 0; i < n; i++) {
+        const a = spin + (i / n) * Math.PI * 2;
+        const doing = boardStatuses[i] === "doing";
+        const wobble = doing && !REDUCED ? Math.sin(t * 5 + i) * 0.35 : 0;
+        const r = 7.2 + wobble * 0.3;
+        attr.setXYZ(i, Math.cos(a) * r, Math.sin(a * 2 + t * 0.3) * 0.5 + wobble, Math.sin(a) * r);
+      }
+      attr.needsUpdate = true;
+    }
+
     // beams
     for (let b = beams.length - 1; b >= 0; b--) {
       const beam = beams[b];
@@ -384,6 +452,7 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
     setWorking,
     beamTo,
     flashDone,
+    setBoard,
     dispose() {
       cancelAnimationFrame(raf);
       canvas.removeEventListener("pointerdown", onPointerDown);

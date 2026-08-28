@@ -91,6 +91,65 @@ export async function fetchStatus(opts?: { via?: "agent"; tool?: string }) {
   };
 }
 
+export type BoardStatus = "todo" | "doing" | "done";
+
+export interface BoardItem {
+  id: string;
+  title: string;
+  note: string;
+  status: BoardStatus;
+  createdBy: "human" | "agent";
+  ts: number;
+  updatedTs: number;
+}
+
+export async function fetchBoard(opts?: { via?: "agent"; tool?: string }): Promise<BoardItem[]> {
+  const params = new URLSearchParams({ session: sessionId() });
+  if (opts?.via === "agent") {
+    params.set("via", "agent");
+    if (opts.tool) params.set("tool", opts.tool);
+  }
+  const res = await fetch(`${API_BASE}/api/board?${params}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `board fetch failed (${res.status})`);
+  return data.items as BoardItem[];
+}
+
+export async function mutateBoard(input: {
+  action: "add" | "update" | "remove";
+  id?: string;
+  title?: string;
+  note?: string;
+  status?: BoardStatus;
+  via: "human" | "agent";
+  tool?: string;
+}): Promise<BoardItem> {
+  const res = await fetch(`${API_BASE}/api/board`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: sessionId(), ...input }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `board ${input.action} failed (${res.status})`);
+  return data.item as BoardItem;
+}
+
+export async function delegateBoardItem(
+  id: string,
+  via: "human" | "agent",
+  tool?: string
+): Promise<TaskResponse & { id: string }> {
+  const res = await fetch(`${API_BASE}/api/board/delegate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: sessionId(), id, via, tool }),
+    signal: AbortSignal.timeout(160_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `delegate failed (${res.status})`);
+  return data as TaskResponse & { id: string };
+}
+
 export type StreamEvent =
   | { type: "task"; taskId: string; via: "human" | "agent"; task: string }
   | { type: "routed"; taskId: string; companion: string; how: string }
@@ -98,7 +157,12 @@ export type StreamEvent =
   | { type: "delta"; taskId: string; companion: string; text: string }
   | { type: "done"; taskId: string; companion: string; via: "human" | "agent"; result: string }
   | { type: "task-error"; taskId: string; companion?: string; message: string }
-  | { type: "agent-tool"; tool: string; detail: string };
+  | { type: "agent-tool"; tool: string; detail: string }
+  | {
+      type: "board";
+      items: BoardItem[];
+      changed?: { id: string; action: "add" | "update" | "remove"; via: "human" | "agent"; title: string };
+    };
 
 export function openStream(
   onEvent: (e: StreamEvent) => void,

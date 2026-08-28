@@ -25,6 +25,17 @@
       <span class="console-title">Shared workspace</span>
       <span class="console-sub">humans &amp; agents write here together</span>
     </div>
+    <section id="board" aria-label="Shared board">
+      <div class="board-head">
+        <span class="board-title">Board</span>
+        <span class="board-count" id="board-count"></span>
+      </div>
+      <div id="board-items"></div>
+      <form id="board-composer" autocomplete="off">
+        <input id="board-input" type="text" placeholder="Add to the plan…" maxlength="140" aria-label="New board item" />
+        <button type="submit" aria-label="Add board item">+</button>
+      </form>
+    </section>
     <div id="feed" role="log" aria-live="polite"></div>
     <form id="composer" autocomplete="off">
       <input id="task-input" type="text" placeholder="Give the team a task…" maxlength="4000" aria-label="Task for the team" />

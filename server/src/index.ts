@@ -18,7 +18,15 @@ import { randomUUID } from "crypto";
 import { TEAM, teamInfo, findMember } from "./team.js";
 import { route } from "./orchestrator.js";
 import { runTask } from "./companion.js";
-import { recall, allEntries } from "./memory.js";
+import {
+  recall,
+  allEntries,
+  listBoard,
+  addBoardItem,
+  updateBoardItem,
+  removeBoardItem,
+  BoardStatus,
+} from "./memory.js";
 import { publish, subscribe } from "./bus.js";
 import { tryAcquire, release } from "./limits.js";
 
@@ -162,6 +170,131 @@ app.post("/api/task", async (req, res) => {
 
     res.json({ taskId, companion, how, result });
   } catch (err) {
+    let message = err instanceof Error ? err.message : "Unknown error while running the task.";
+    if (/authentication|x-api-key|invalid.*api key|401/i.test(message)) {
+      message = "The demo server has no valid ANTHROPIC_API_KEY configured — the operator needs to set it.";
+    }
+    publish(sessionId, { type: "task-error", taskId, message });
+    res.status(500).json({ error: message });
+  } finally {
+    markFree(sessionId, taskId);
+    release(sessionId);
+  }
+});
+
+/* ---------------- board: real shared state, no model in the loop ---------------- */
+
+function broadcastBoard(
+  sessionId: string,
+  changed?: { id: string; action: "add" | "update" | "remove"; via: "human" | "agent"; title: string }
+) {
+  publish(sessionId, { type: "board", items: listBoard(sessionId), changed });
+}
+
+app.get("/api/board", (req, res) => {
+  const sessionId = String(req.query.session ?? "");
+  if (!sessionId) return res.status(400).json({ error: "session query param required" });
+  agentPing(sessionId, req.query.via, req.query.tool ?? "list_board", "read the board");
+  res.json({ items: listBoard(sessionId) });
+});
+
+app.post("/api/board", (req, res) => {
+  const { sessionId, action, id, title, note, status, via, tool } = req.body ?? {};
+  if (typeof sessionId !== "string" || !sessionId) {
+    return res.status(400).json({ error: "sessionId required" });
+  }
+  const viaClean: "human" | "agent" = via === "agent" ? "agent" : "human";
+
+  let result: ReturnType<typeof addBoardItem>;
+  if (action === "add") {
+    if (typeof title !== "string") return res.status(400).json({ error: "title required" });
+    agentPing(sessionId, viaClean, tool ?? "add_board_item", `added to board: "${String(title).slice(0, 60)}"`);
+    result = addBoardItem(sessionId, {
+      title,
+      note: typeof note === "string" ? note : undefined,
+      status: status as BoardStatus | undefined,
+      createdBy: viaClean,
+    });
+  } else if (action === "update") {
+    if (typeof id !== "string") return res.status(400).json({ error: "id required" });
+    agentPing(sessionId, viaClean, tool ?? "update_board_item", `updated ${id}${status ? ` → ${status}` : ""}`);
+    result = updateBoardItem(sessionId, id, {
+      title: typeof title === "string" ? title : undefined,
+      note: typeof note === "string" ? note : undefined,
+      status: status as BoardStatus | undefined,
+    });
+  } else if (action === "remove") {
+    if (typeof id !== "string") return res.status(400).json({ error: "id required" });
+    agentPing(sessionId, viaClean, tool ?? "remove_board_item", `removed ${id} from the board`);
+    result = removeBoardItem(sessionId, id);
+  } else {
+    return res.status(400).json({ error: `Unknown action "${action}". Use add, update or remove.` });
+  }
+
+  if ("error" in result) return res.status(400).json({ error: result.error });
+
+  broadcastBoard(sessionId, {
+    id: result.id,
+    action: action as "add" | "update" | "remove",
+    via: viaClean,
+    title: result.title,
+  });
+  res.json({ item: result });
+});
+
+/**
+ * The bridge: send a board item through the team. Marks it "doing",
+ * routes it like any task, and when the companion finishes, files the
+ * outcome back into the item and marks it "done". Real state in, real
+ * state out — the model only does the work in the middle.
+ */
+app.post("/api/board/delegate", async (req, res) => {
+  const { sessionId, id, via, tool } = req.body ?? {};
+  if (typeof sessionId !== "string" || !sessionId) {
+    return res.status(400).json({ error: "sessionId required" });
+  }
+  if (typeof id !== "string" || !id) return res.status(400).json({ error: "id required" });
+  const viaClean: "human" | "agent" = via === "agent" ? "agent" : "human";
+
+  const item = listBoard(sessionId).find((b) => b.id === id);
+  if (!item) {
+    return res.status(404).json({ error: `No board item "${id}". Use list_board to see current ids.` });
+  }
+
+  const gate = tryAcquire(sessionId);
+  if (!gate.ok) return res.status(429).json({ error: gate.reason });
+
+  const taskId = randomUUID();
+  const taskText = item.note ? `${item.title}\n\nContext note on the board item: ${item.note}` : item.title;
+
+  try {
+    agentPing(sessionId, viaClean, tool ?? "delegate_board_item", `sent ${id} "${item.title.slice(0, 50)}" to the team`);
+    publish(sessionId, { type: "task", taskId, via: viaClean, task: `[board ${id}] ${item.title}` });
+
+    updateBoardItem(sessionId, id, { status: "doing" });
+    broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
+
+    const routed = await route(taskText);
+    publish(sessionId, { type: "routed", taskId, companion: routed.companion, how: routed.how });
+    markBusy(sessionId, taskId, routed.companion, item.title);
+
+    const member = findMember(routed.companion)!;
+    const result = await Promise.race([
+      runTask({ sessionId, taskId, member, task: taskText, via: viaClean }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Task timed out (demo limit).")), TASK_HARD_TIMEOUT_MS)
+      ),
+    ]);
+
+    const summary = result.replace(/\s+/g, " ").trim().slice(0, 280);
+    updateBoardItem(sessionId, id, { status: "done", note: summary });
+    broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
+
+    res.json({ taskId, id, companion: routed.companion, how: routed.how, result });
+  } catch (err) {
+    updateBoardItem(sessionId, id, { status: "todo" }); // roll back so it can be retried
+    broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
+
     let message = err instanceof Error ? err.message : "Unknown error while running the task.";
     if (/authentication|x-api-key|invalid.*api key|401/i.test(message)) {
       message = "The demo server has no valid ANTHROPIC_API_KEY configured — the operator needs to set it.";

@@ -11,7 +11,7 @@
  * If neither exists we surface how to enable it instead of failing quietly.
  */
 
-import { submitTask, recallMemory, fetchStatus, fetchTeam } from "./api.js";
+import { submitTask, recallMemory, fetchStatus, fetchTeam, fetchBoard, mutateBoard, delegateBoardItem } from "./api.js";
 
 type ToolResult = { content: { type: "text"; text: string }[] };
 
@@ -154,6 +154,125 @@ export const TOOLS: WebMCPTool[] = [
           .map((h) => `- [${h.via} → ${h.companion}] ${h.task}\n  outcome: ${h.summary}`)
           .join("\n");
         return text(`Workspace matches for "${r.query}":\n${lines}`);
+      } catch (e) {
+        return err(e);
+      }
+    },
+  },
+  {
+    name: "list_board",
+    description:
+      "Read the shared workspace board — the CURRENT PLAN both the human and you edit together. " +
+      "Items have an id (like b1), a title, an optional note, and a status: todo, doing or done. " +
+      "Always read the board before adding or changing items, so you build on the human's plan " +
+      "instead of duplicating it. This is real state on the page, not generated text.",
+    inputSchema: { type: "object", properties: {} },
+    execute: async () => {
+      try {
+        const items = await fetchBoard({ via: "agent", tool: "list_board" });
+        if (items.length === 0) return text("The board is empty. Use add_board_item to start the plan.");
+        const lines = items
+          .map((b) => `- [${b.id}] (${b.status}) ${b.title}${b.note ? ` — note: ${b.note}` : ""}`)
+          .join("\n");
+        return text(`Current board:\n${lines}`);
+      } catch (e) {
+        return err(e);
+      }
+    },
+  },
+  {
+    name: "add_board_item",
+    description:
+      "Add an item to the shared workspace board the human is looking at. Use this to lay out a " +
+      "plan, capture decisions, or queue work — each item appears instantly in the human's UI and " +
+      "in the 3D scene. Prefer several small, concrete items over one vague one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short, concrete item title (max 140 chars)." },
+        note: { type: "string", description: "Optional context or detail for the item." },
+        status: {
+          type: "string",
+          enum: ["todo", "doing", "done"],
+          description: "Initial status. Defaults to todo.",
+        },
+      },
+      required: ["title"],
+    },
+    execute: async ({ title, note, status }: { title: string; note?: string; status?: any }) => {
+      try {
+        const item = await mutateBoard({ action: "add", title, note, status, via: "agent", tool: "add_board_item" });
+        return text(`Added [${item.id}] "${item.title}" (${item.status}) to the board.`);
+      } catch (e) {
+        return err(e);
+      }
+    },
+  },
+  {
+    name: "update_board_item",
+    description:
+      "Update a board item: change its status (todo → doing → done), retitle it, or attach a note. " +
+      "Use the id from list_board (e.g. b2). Moving items is how you and the human keep a shared " +
+      "picture of progress.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Item id, e.g. \"b2\"." },
+        status: { type: "string", enum: ["todo", "doing", "done"], description: "New status." },
+        title: { type: "string", description: "New title (optional)." },
+        note: { type: "string", description: "New note (optional, replaces the old one)." },
+      },
+      required: ["id"],
+    },
+    execute: async ({ id, status, title, note }: { id: string; status?: any; title?: string; note?: string }) => {
+      try {
+        const item = await mutateBoard({ action: "update", id, status, title, note, via: "agent", tool: "update_board_item" });
+        return text(`Updated [${item.id}]: "${item.title}" is now ${item.status}${item.note ? ` — note: ${item.note}` : ""}.`);
+      } catch (e) {
+        return err(e);
+      }
+    },
+  },
+  {
+    name: "remove_board_item",
+    description:
+      "Remove an item from the shared board by id. Only remove items that are obsolete or were " +
+      "added by mistake — completed work should be marked done, not removed, so the human keeps " +
+      "the picture of what happened.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Item id, e.g. \"b3\"." },
+      },
+      required: ["id"],
+    },
+    execute: async ({ id }: { id: string }) => {
+      try {
+        const item = await mutateBoard({ action: "remove", id, via: "agent", tool: "remove_board_item" });
+        return text(`Removed [${item.id}] "${item.title}" from the board.`);
+      } catch (e) {
+        return err(e);
+      }
+    },
+  },
+  {
+    name: "delegate_board_item",
+    description:
+      "Send one board item to Leia's team to actually get done: the item flips to \"doing\", Leia " +
+      "routes it to the right specialist, and when they finish the item flips to \"done\" with the " +
+      "outcome attached as its note. The human watches all of it happen live. This is the bridge " +
+      "between the shared plan (board) and the team doing the work.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Board item id to execute, e.g. \"b1\"." },
+      },
+      required: ["id"],
+    },
+    execute: async ({ id }: { id: string }) => {
+      try {
+        const r = await delegateBoardItem(id, "agent", "delegate_board_item");
+        return text(`[${r.id}] handled by ${r.companion} and marked done.\n\n${r.result}`);
       } catch (e) {
         return err(e);
       }

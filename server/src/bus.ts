@@ -8,6 +8,8 @@
  * what lets the 3D scene animate the work in real time.
  */
 
+import type { BoardItem } from "./memory.js";
+
 export type BusEvent =
   | { type: "task"; taskId: string; via: "human" | "agent"; task: string }
   | { type: "routed"; taskId: string; companion: string; how: string }
@@ -16,7 +18,12 @@ export type BusEvent =
   | { type: "done"; taskId: string; companion: string; via: "human" | "agent"; result: string }
   | { type: "task-error"; taskId: string; companion?: string; message: string }
   | { type: "agent-tool"; tool: string; detail: string }
-  | { type: "status"; busy: { companion: string; task: string }[] };
+  | { type: "status"; busy: { companion: string; task: string }[] }
+  | {
+      type: "board";
+      items: BoardItem[];
+      changed?: { id: string; action: "add" | "update" | "remove"; via: "human" | "agent"; title: string };
+    };
 
 type Listener = (e: BusEvent) => void;
 

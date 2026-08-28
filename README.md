@@ -2,9 +2,11 @@
 
 Seven AI specialists. One orchestrator. A shared workspace that **you and your AI agent command together** — and a 3D world where you watch it happen.
 
-Leia is a WebMCP demo built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/). Open the page as a human and you get a chat console and a particle constellation of seven companions. Open it in an agent's browser (ChatGPT's in-app browser, or Chrome with WebMCP enabled) and the same page exposes **five structured tools** on `navigator.modelContext` — your agent can delegate work to the team, ask specialists directly, and read the shared session memory. Every tool call the agent makes is visible live: a beam of light flows from Leia to the chosen companion, and the agent's calls print into the workspace feed the human is watching.
+Leia is a WebMCP demo built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/). Open the page as a human and you get a **shared board** (the plan), a chat console, and a particle constellation of seven companions. Open it in an agent's browser (ChatGPT's in-app browser, or Chrome with WebMCP enabled) and the same page exposes **ten structured tools** on `navigator.modelContext`.
 
-**Human + agent, meaningfully better together:** the agent gains what it normally lacks — a persistent session workspace and a team of role-specialized workers — while the human sees, steers and continues everything the agent did, in the same space.
+The core of the demo is the board: **real, editable state that the human and the agent manipulate through the same operations** — add an item, move it todo → doing → done, attach notes. No model call happens on a board mutation; it is plain state the page owns, and every change renders live in the human's UI and in the 3D scene. On top of that sits the team: `delegate_board_item` sends a board item through Leia's routing to a specialist companion, and the outcome lands back **on the item itself** — plan and execution stay one thing.
+
+**Human + agent, meaningfully better together:** the agent gains what it normally lacks — a persistent shared plan, a session workspace memory, and a team of role-specialized workers — while the human sees, steers and continues everything the agent did, in the same space.
 
 ## The team
 
@@ -22,9 +24,21 @@ Leia is a WebMCP demo built for the [OpenAI WebMCP Challenge](https://openai.com
 
 ## Tools exposed over WebMCP
 
+**The board — shared state, no model in the loop:**
+
 | Tool | What it does |
 | --- | --- |
-| `delegate_task` | Hand a task to the team; Leia picks the right companion and returns their result |
+| `list_board` | Read the current shared plan (ids, titles, notes, statuses) |
+| `add_board_item` | Add an item to the plan the human is looking at |
+| `update_board_item` | Move an item todo → doing → done, retitle it, attach a note |
+| `remove_board_item` | Remove an obsolete item |
+| `delegate_board_item` | Send an item through the team; the outcome lands back on the item and it flips to done |
+
+**The team — specialists on demand:**
+
+| Tool | What it does |
+| --- | --- |
+| `delegate_task` | Hand a free-form task to the team; Leia picks the right companion |
 | `ask_companion` | Ask one specific companion directly, bypassing routing |
 | `list_companions` | The roster and each companion's specialty |
 | `get_team_status` | Who is busy with what right now + recent completed work |
