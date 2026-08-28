@@ -419,12 +419,15 @@ async function boot() {
 
   renderLegend();
   renderAgentPanel();
-  fetchBoard()
-    .then(renderBoard)
-    .catch(() => {}); // board comes in over SSE anyway on first change
 
   await document.fonts.ready.catch(() => {});
   scene = initScene($("#world") as HTMLCanvasElement, team);
+
+  // AFTER the scene exists — otherwise items already on the board at page
+  // load render in the panel but never make it into the 3D ring
+  fetchBoard()
+    .then(renderBoard)
+    .catch(() => {}); // board also comes in over SSE on first change
 
   openStream(handleEvent, (state) => {
     if (state === "open") {

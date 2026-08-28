@@ -176,10 +176,16 @@ export function openStream(
     source = new EventSource(`${API_BASE}/api/stream?session=${sessionId()}`);
     source.onopen = () => onState("open");
     source.onmessage = (ev) => {
+      let event: StreamEvent;
       try {
-        onEvent(JSON.parse(ev.data) as StreamEvent);
+        event = JSON.parse(ev.data) as StreamEvent;
       } catch {
-        /* ignore malformed frames */
+        return; // malformed frame — ignore
+      }
+      try {
+        onEvent(event);
+      } catch (err) {
+        console.warn("Leia: event handler failed on", event.type, err);
       }
     };
     source.onerror = () => {
