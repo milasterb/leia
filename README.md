@@ -2,7 +2,7 @@
 
 Seven AI specialists. One orchestrator. A shared workspace that **you and your AI agent command together** — and a 3D world where you watch it happen.
 
-Leia is a WebMCP demo built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/). Open the page as a human and you get a **shared board** (the plan), a chat console, and a particle constellation of seven companions. Open it in an agent's browser (ChatGPT's in-app browser, or Chrome with WebMCP enabled) and the same page exposes **ten structured tools** on `navigator.modelContext`.
+Leia is a WebMCP demo built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/). Open the page as a human and you get a **shared board** (the plan), a chat console, and a particle constellation of seven companions. Open it in an agent's browser (ChatGPT's in-app browser, or Chrome with WebMCP enabled) and the same page exposes **ten structured tools** through the browser's WebMCP API.
 
 The core of the demo is the board: **real, editable state that the human and the agent manipulate through the same operations** — add an item, move it todo → doing → done, attach notes. No model call happens on a board mutation; it is plain state the page owns, and every change renders live in the human's UI and in the 3D scene. On top of that sits the team: `delegate_board_item` sends a board item through Leia's routing to a specialist companion, and the outcome lands back **on the item itself** — plan and execution stay one thing.
 
@@ -44,7 +44,7 @@ The core of the demo is the board: **real, editable state that the human and the
 | `get_team_status` | Who is busy with what right now + recent completed work |
 | `recall_workspace_memory` | Search the shared per-session memory (human's and agent's work alike) |
 
-Registration is defensive across spec revisions: `registerTool()` per tool when available, `provideContext({ tools })` as a fallback, and a visible hint when the browser exposes neither.
+Registration is defensive across spec revisions: the WebMCP preview has moved where it lives on the browser object between Chrome Canary builds (`navigator.modelContext` in earlier drafts, `document.modelContext` in some current ones), so the client checks both. `registerTool()` is used when available, `provideContext({ tools })` as an older-spec fallback, with a visible hint in the UI when the browser exposes neither.
 
 ## Architecture
 
@@ -59,7 +59,7 @@ server/   Node 20 + Express + Anthropic SDK  →  Render (web service)
 
 One design rule keeps the page coherent: **everything renders from the SSE event stream.** Human tasks, agent tool calls, routing decisions, streamed deltas — one stream, so the feed and the 3D scene always agree.
 
-Session memory is per-browser-session, in-process, and dropped after 45 minutes of inactivity. Nothing is shared between visitors and nothing is persisted.
+Session memory (the board, the activity log) is per-browser-session, in-process, and dropped after 45 minutes of inactivity — nothing there is shared between visitors, and nothing is persisted. The one deliberate exception is the token/cost tracker, which is a global running total across everyone using the demo (see Budget guards below); it resets only when the server restarts.
 
 ## Run locally
 
@@ -81,11 +81,22 @@ To exercise the WebMCP layer, open the page in ChatGPT's in-app browser or in Ch
 ## Deploy
 
 - **web → Vercel:** project root `web/`, build `npm run build`, output `dist/`. Set `VITE_API_URL` to the server URL.
-- **server → Render:** `render.yaml` in the repo root describes the service. Set `ANTHROPIC_API_KEY` (and `WEB_ORIGIN` to the Vercel URL) in the Render dashboard.
+- **server → Render:** `render.yaml` in the repo root describes the service. Set **Language: Node** (Render sometimes defaults to Docker, which won't find a Dockerfile here) and **Root Directory: `server`**. Set `ANTHROPIC_API_KEY` (and `WEB_ORIGIN` to the Vercel URL) in the Render dashboard.
 
 ## Budget guards
 
-This is a public demo running on a real API key, so the server enforces per-session rate limits, per-session and global concurrency caps, token ceilings and a hard task timeout. All tunable via env — see `server/.env.example`.
+This is a public demo running on a real API key, so the server enforces per-session rate limits, per-session and global concurrency caps, token ceilings and a hard task timeout. All tunable via env — see `server/.env.example`. A live token/cost readout in the HUD (`GET /api/usage`) tracks exact token counts per model since the server last started, with an approximate USD estimate from published rates — a courtesy figure, not a bill.
+
+## Reliability & security
+
+Built and pressure-tested past the happy path, since this runs a real, paid API key in public:
+
+- **CORS locked to the deployed frontend** — the server only answers `leia-theta.vercel.app`, verified by attempting cross-origin requests from an unrelated domain
+- **Sessions are isolated** — a session only ever sees its own board and memory; there is no cross-session read path
+- **User-supplied board content is rendered as text, never HTML** — injected markup shows up literally, it doesn't execute
+- **Every mutation is validated server-side**, independent of the client: type checks, length caps, and existence checks on ids, with the same guarantees whether the caller is the human UI or a WebMCP tool call
+- **A board item can't be double-delegated** — concurrent or repeated delegation on the same item is rejected instead of silently paying for the same work twice
+- **The live event stream self-heals** — if a connection goes quiet (some proxies drop idle connections without ever erroring), the client detects the silence and reconnects on its own
 
 ## Lineage
 
