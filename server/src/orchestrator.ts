@@ -12,6 +12,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { TEAM, findMember, ORCHESTRATOR_NAME } from "./team.js";
+import { record as recordUsage } from "./usage.js";
 
 const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY from env
 
@@ -58,6 +59,7 @@ async function routeByModel(task: string): Promise<string | null> {
       system,
       messages: [{ role: "user", content: task }],
     });
+    recordUsage(ROUTER_MODEL, response.usage.input_tokens, response.usage.output_tokens);
 
     const answer = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")

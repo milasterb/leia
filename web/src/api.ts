@@ -150,6 +150,20 @@ export async function delegateBoardItem(
   return data as TaskResponse & { id: string };
 }
 
+export interface UsageSummary {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCalls: number;
+  estimatedCostUsd: number;
+  byModel: { model: string; inputTokens: number; outputTokens: number; calls: number; estimatedCostUsd: number }[];
+}
+
+export async function fetchUsage(): Promise<UsageSummary> {
+  const res = await fetch(`${API_BASE}/api/usage`);
+  if (!res.ok) throw new Error(`usage fetch failed (${res.status})`);
+  return res.json();
+}
+
 export type StreamEvent =
   | { type: "task"; taskId: string; via: "human" | "agent"; task: string }
   | { type: "routed"; taskId: string; companion: string; how: string }

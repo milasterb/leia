@@ -29,6 +29,7 @@ import {
 } from "./memory.js";
 import { publish, subscribe } from "./bus.js";
 import { tryAcquire, release } from "./limits.js";
+import { summary as usageSummary } from "./usage.js";
 
 const app = express();
 app.use(express.json({ limit: "32kb" }));
@@ -66,6 +67,13 @@ function agentPing(sessionId: string | undefined, via: unknown, tool: unknown, d
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, team: TEAM.length });
+});
+
+// Global, not per-session — how much the whole public demo has spent since
+// the server last started. estimatedCostUsd is a courtesy estimate from
+// published rates, not a bill; token counts are exact.
+app.get("/api/usage", (_req, res) => {
+  res.json(usageSummary());
 });
 
 app.get("/api/team", (req, res) => {
@@ -287,8 +295,8 @@ app.post("/api/board/delegate", async (req, res) => {
     agentPing(sessionId, viaClean, tool ?? "delegate_board_item", `sent ${id} "${item.title.slice(0, 50)}" to the team`);
     publish(sessionId, { type: "task", taskId, via: viaClean, task: `[board ${id}] ${item.title}` });
 
-    updateBoardItem(sessionId, id, { status: "doing" });
-    broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
+    const toDoing = updateBoardItem(sessionId, id, { status: "doing" });
+    if (!("error" in toDoing)) broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
 
     const routed = await route(taskText);
     publish(sessionId, { type: "routed", taskId, companion: routed.companion, how: routed.how });
@@ -303,13 +311,17 @@ app.post("/api/board/delegate", async (req, res) => {
     ]);
 
     const summary = result.replace(/\s+/g, " ").trim().slice(0, 280);
-    updateBoardItem(sessionId, id, { status: "done", note: summary });
-    broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
+    // the item may have been deleted while this delegation was mid-flight
+    // (e.g. someone hit "remove" on a "doing" item) — the work still
+    // happened and the caller still gets the result, but there's nothing
+    // left on the board to write it back to, so skip the board broadcast
+    const toDone = updateBoardItem(sessionId, id, { status: "done", note: summary });
+    if (!("error" in toDone)) broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
 
     res.json({ taskId, id, companion: routed.companion, how: routed.how, result });
   } catch (err) {
-    updateBoardItem(sessionId, id, { status: "todo" }); // roll back so it can be retried
-    broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
+    const rollback = updateBoardItem(sessionId, id, { status: "todo" }); // roll back so it can be retried
+    if (!("error" in rollback)) broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
 
     let message = err instanceof Error ? err.message : "Unknown error while running the task.";
     if (/authentication|x-api-key|invalid.*api key|401/i.test(message)) {

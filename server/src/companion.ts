@@ -9,6 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { TeamMember, ORCHESTRATOR_NAME } from "./team.js";
 import { publish } from "./bus.js";
 import { remember, digest } from "./memory.js";
+import { record as recordUsage } from "./usage.js";
 
 const anthropic = new Anthropic();
 
@@ -74,6 +75,7 @@ export async function runTask(input: RunTaskInput): Promise<string> {
   });
 
   const finalMessage = await stream.finalMessage();
+  recordUsage(COMPANION_MODEL, finalMessage.usage.input_tokens, finalMessage.usage.output_tokens);
 
   // A reply can hold SEVERAL text blocks — typically around a server-side
   // web search (text → search → text with findings). Taking only the first

@@ -14,6 +14,7 @@ import {
   fetchBoard,
   mutateBoard,
   delegateBoardItem,
+  fetchUsage,
   openStream,
   submitTask,
   sessionId,
@@ -29,6 +30,7 @@ const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as
 
 const feed = $("#feed") as HTMLDivElement;
 const conn = $("#conn") as HTMLDivElement;
+const usageEl = $("#usage") as HTMLDivElement;
 const legend = $("#legend") as HTMLElement;
 const composer = $("#composer") as HTMLFormElement;
 const input = $("#task-input") as HTMLInputElement;
@@ -266,6 +268,25 @@ boardComposer.addEventListener("submit", (ev) => {
   );
 });
 
+/* ---------------- usage / cost estimate ---------------- */
+
+let usageTimer = 0;
+function refreshUsage() {
+  fetchUsage()
+    .then((u) => {
+      if (u.totalCalls === 0) {
+        usageEl.textContent = "";
+        return;
+      }
+      const tokens = u.totalInputTokens + u.totalOutputTokens;
+      const tokensFmt = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+      usageEl.textContent = `~${tokensFmt} tokens · ~$${u.estimatedCostUsd.toFixed(3)} (demo total, est.)`;
+    })
+    .catch(() => {
+      /* purely cosmetic — silently skip on failure */
+    });
+}
+
 /* ---------------- legend ---------------- */
 
 function renderLegend() {
@@ -360,6 +381,7 @@ function handleEvent(e: StreamEvent) {
       setChipWorking(e.companion, false);
       scene?.flashDone(e.companion);
       finishBubble(e.taskId, e.companion, e.result);
+      refreshUsage(); // this companion's call is already recorded server-side by the time "done" arrives
       break;
     case "task-error":
       if (e.companion) {
@@ -419,6 +441,9 @@ async function boot() {
 
   renderLegend();
   renderAgentPanel();
+  refreshUsage();
+  clearInterval(usageTimer);
+  usageTimer = window.setInterval(refreshUsage, 20_000); // catches spend from other visitors too
 
   await document.fonts.ready.catch(() => {});
   scene = initScene($("#world") as HTMLCanvasElement, team);
