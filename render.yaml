@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: leia-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: WEB_ORIGIN
+        value: "*"

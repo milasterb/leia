@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leia — a living agent workspace</title>
+  <meta name="description" content="Seven AI specialists, one orchestrator — a shared workspace you and your agent command together. WebMCP-enabled." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Outfit:wght@300..700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <canvas id="world"></canvas>
+
+  <header id="hud">
+    <h1 class="wordmark">Leia</h1>
+    <p class="tagline">Seven specialists. One orchestrator.<br />Yours — and your agent's.</p>
+    <div id="conn" class="conn">connecting…</div>
+  </header>
+
+  <aside id="legend" aria-label="Team"></aside>
+
+  <section id="console" aria-label="Workspace console">
+    <div class="console-head">
+      <span class="console-title">Shared workspace</span>
+      <span class="console-sub">humans &amp; agents write here together</span>
+    </div>
+    <div id="feed" role="log" aria-live="polite"></div>
+    <form id="composer" autocomplete="off">
+      <input id="task-input" type="text" placeholder="Give the team a task…" maxlength="4000" aria-label="Task for the team" />
+      <button id="send" type="submit">Send</button>
+    </form>
+  </section>
+
+  <aside id="agent-panel">
+    <button id="agent-pill" type="button" aria-expanded="false">
+      <span class="dot" id="agent-dot"></span>
+      <span id="agent-pill-text">Agent link</span>
+    </button>
+    <div id="agent-drawer" hidden>
+      <p class="agent-drawer-title">Tools exposed to your agent</p>
+      <ul id="agent-tools"></ul>
+      <p id="agent-hint" class="agent-hint"></p>
+    </div>
+  </aside>
+
+  <p id="hint" class="hint">drag to orbit · scroll to zoom</p>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

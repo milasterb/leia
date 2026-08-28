@@ -1,0 +1,86 @@
+# Leia — a living agent workspace
+
+Seven AI specialists. One orchestrator. A shared workspace that **you and your AI agent command together** — and a 3D world where you watch it happen.
+
+Leia is a WebMCP demo built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/). Open the page as a human and you get a chat console and a particle constellation of seven companions. Open it in an agent's browser (ChatGPT's in-app browser, or Chrome with WebMCP enabled) and the same page exposes **five structured tools** on `navigator.modelContext` — your agent can delegate work to the team, ask specialists directly, and read the shared session memory. Every tool call the agent makes is visible live: a beam of light flows from Leia to the chosen companion, and the agent's calls print into the workspace feed the human is watching.
+
+**Human + agent, meaningfully better together:** the agent gains what it normally lacks — a persistent session workspace and a team of role-specialized workers — while the human sees, steers and continues everything the agent did, in the same space.
+
+## The team
+
+| Companion | Specialty |
+| --- | --- |
+| **Smith** | engineering — writes, fixes and explains code |
+| **Scout** | research — finds and verifies information (live web search) |
+| **Keeper** | context — guards the shared workspace memory, recalls what the team knows |
+| **Scribe** | writing — texts, docs, emails |
+| **Planner** | planning — task breakdown, estimates, priorities |
+| **Warden** | review — critiques work, finds holes and risks |
+| **Analyst** | data — numbers, calculations, comparisons |
+
+**Leia** herself does no work — she routes. Routing is two-tier: a small model decides by meaning; a keyword scorer is the fallback when the model call fails.
+
+## Tools exposed over WebMCP
+
+| Tool | What it does |
+| --- | --- |
+| `delegate_task` | Hand a task to the team; Leia picks the right companion and returns their result |
+| `ask_companion` | Ask one specific companion directly, bypassing routing |
+| `list_companions` | The roster and each companion's specialty |
+| `get_team_status` | Who is busy with what right now + recent completed work |
+| `recall_workspace_memory` | Search the shared per-session memory (human's and agent's work alike) |
+
+Registration is defensive across spec revisions: `registerTool()` per tool when available, `provideContext({ tools })` as a fallback, and a visible hint when the browser exposes neither.
+
+## Architecture
+
+```
+web/      Vite + TypeScript + three.js  →  Vercel (static)
+          the 3D world, the human console, the WebMCP tool layer
+
+server/   Node 20 + Express + Anthropic SDK  →  Render (web service)
+          orchestrator (two-tier routing), companion runner (streaming),
+          session-scoped workspace memory, SSE event stream, rate limits
+```
+
+One design rule keeps the page coherent: **everything renders from the SSE event stream.** Human tasks, agent tool calls, routing decisions, streamed deltas — one stream, so the feed and the 3D scene always agree.
+
+Session memory is per-browser-session, in-process, and dropped after 45 minutes of inactivity. Nothing is shared between visitors and nothing is persisted.
+
+## Run locally
+
+```bash
+# server
+cd server
+cp .env.example .env        # put your ANTHROPIC_API_KEY in .env
+npm install
+npm run dev                 # http://localhost:8787
+
+# web (second terminal)
+cd web
+npm install
+npm run dev                 # http://localhost:5173
+```
+
+To exercise the WebMCP layer, open the page in ChatGPT's in-app browser or in Chrome with WebMCP enabled (experimental flag / origin trial), then ask the agent to e.g. *"use list_companions, then delegate a task to plan a weekend in Prague."*
+
+## Deploy
+
+- **web → Vercel:** project root `web/`, build `npm run build`, output `dist/`. Set `VITE_API_URL` to the server URL.
+- **server → Render:** `render.yaml` in the repo root describes the service. Set `ANTHROPIC_API_KEY` (and `WEB_ORIGIN` to the Vercel URL) in the Render dashboard.
+
+## Budget guards
+
+This is a public demo running on a real API key, so the server enforces per-session rate limits, per-session and global concurrency caps, token ceilings and a hard task timeout. All tunable via env — see `server/.env.example`.
+
+## Lineage
+
+Leia is a standalone, public-safe spinoff of **Themis**, my personal multi-agent AI operating system that runs 24/7 on a Raspberry Pi at home. The companion-team concept, the two-tier routing design and the particle-world aesthetic come from Themis; the code here was written fresh for this challenge so the demo carries none of the private system's infrastructure, data or configuration. The home system's vector memory and message bus are deliberately replaced by session-scoped in-process equivalents.
+
+## AI assistance
+
+This project was built with AI pair-programming assistance (Anthropic's Claude) during the challenge submission period, under my direction and review.
+
+## License
+
+[MIT](./LICENSE)
