@@ -252,7 +252,7 @@ function renderBoard(items: BoardItem[]) {
     boardItemsEl.appendChild(el);
   }
 
-  scene?.setBoard(items.map((b) => b.status));
+  scene?.setBoard(items.map((b) => ({ status: b.status, createdBy: b.createdBy })));
   lastFlashId = null;
 }
 

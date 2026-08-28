@@ -35,11 +35,16 @@ interface Beam {
   positions: Float32Array;
 }
 
+export interface BoardMote {
+  status: string;
+  createdBy: string;
+}
+
 export interface SceneHandle {
   setWorking(name: string, working: boolean): void;
   beamTo(name: string): void;
   flashDone(name: string): void;
-  setBoard(statuses: string[]): void;
+  setBoard(items: BoardMote[]): void;
   dispose(): void;
 }
 
@@ -239,81 +244,104 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
     if (node) node.working = working;
   }
 
-  /* ---------- board ring: one mote per item, orbiting tight around the core ---------- */
-  const BOARD_COLORS: Record<string, THREE.Color> = {
-    todo: new THREE.Color(0xbfb6ea),
-    doing: new THREE.Color(0xf5d9a8),
-    done: new THREE.Color(0x35e0c4),
+  /* ---------- board: one solid glowing disc per item, orbiting the core ---------- */
+  const BOARD_COLORS: Record<string, number> = {
+    todo: 0xbfb6ea,
+    doing: 0xf5d9a8,
+    done: 0x35e0c4,
   };
 
-  // Points render as hard SQUARES without a map — fine for dust-sized
-  // particles, ugly for big lone motes. A radial-gradient sprite turns
-  // them into soft glowing orbs.
-  function makeMoteTexture(): THREE.CanvasTexture {
+  // Solid disc with a soft halo — reads as a full, deliberate object,
+  // not another particle. White texture, tinted per status via material color.
+  function makeDiscTexture(): THREE.CanvasTexture {
     const canvas = document.createElement("canvas");
-    canvas.width = 64;
-    canvas.height = 64;
+    canvas.width = 128;
+    canvas.height = 128;
     const ctx = canvas.getContext("2d")!;
-    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
     gradient.addColorStop(0, "rgba(255,255,255,1)");
-    gradient.addColorStop(0.35, "rgba(255,255,255,0.85)");
-    gradient.addColorStop(0.7, "rgba(255,255,255,0.25)");
-    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    gradient.addColorStop(0.42, "rgba(255,255,255,1)"); // solid core
+    gradient.addColorStop(0.55, "rgba(255,255,255,0.45)");
+    gradient.addColorStop(1, "rgba(255,255,255,0)"); // halo falloff
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillRect(0, 0, 128, 128);
     return new THREE.CanvasTexture(canvas);
   }
-  const moteTexture = makeMoteTexture();
+  const discTexture = makeDiscTexture();
 
-  let boardPoints: THREE.Points | null = null;
-  let boardStatuses: string[] = [];
+  function makeSmallLabel(text: string): THREE.Sprite {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 80;
+    const ctx = canvas.getContext("2d")!;
+    ctx.font = "500 34px 'IBM Plex Mono', monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(236, 233, 247, 0.78)";
+    ctx.fillText(text, 128, 40);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.9,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(2.4, 0.75, 1);
+    return sprite;
+  }
 
-  function setBoard(statuses: string[]) {
-    boardStatuses = statuses;
-    if (boardPoints) {
-      scene.remove(boardPoints);
-      boardPoints.geometry.dispose();
-      (boardPoints.material as THREE.Material).dispose();
-      boardPoints = null;
+  interface MoteNode {
+    group: THREE.Group;
+    disc: THREE.Sprite;
+    status: string;
+  }
+  let motes: MoteNode[] = [];
+
+  function clearMotes() {
+    for (const m of motes) {
+      scene.remove(m.group);
+      m.group.traverse((obj) => {
+        if (obj instanceof THREE.Sprite) {
+          if (obj.material.map && obj.material.map !== discTexture) {
+            obj.material.map.dispose(); // label canvases are per-mote
+          }
+          obj.material.dispose(); // discTexture itself is shared and kept
+        }
+      });
     }
-    if (statuses.length === 0) return;
+    motes = [];
+  }
 
-    const n = statuses.length;
-    const positions = new Float32Array(n * 3);
-    const colors = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      const c = BOARD_COLORS[statuses[i]] ?? BOARD_COLORS.todo;
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
-      // positions are set per-frame in animate(); initialize on the ring so
-      // the first rendered frame is already correct
-      const a = (i / n) * Math.PI * 2;
-      positions[i * 3] = Math.cos(a) * 10.5;
-      positions[i * 3 + 1] = Math.sin(a * 2) * 0.6;
-      positions[i * 3 + 2] = Math.sin(a) * 10.5;
+  function setBoard(items: BoardMote[]) {
+    clearMotes();
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const group = new THREE.Group();
+
+      const disc = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: discTexture,
+          color: BOARD_COLORS[item.status] ?? BOARD_COLORS.todo,
+          transparent: true,
+          depthWrite: false,
+          opacity: item.status === "done" ? 0.75 : 0.95,
+        })
+      );
+      disc.scale.setScalar(1.9);
+      group.add(disc);
+
+      const label = makeSmallLabel(item.createdBy === "agent" ? "agent" : "human");
+      label.position.y = -1.55;
+      group.add(label);
+
+      // initial position on the ring; refreshed every frame in animate()
+      const a = (i / items.length) * Math.PI * 2;
+      group.position.set(Math.cos(a) * 10.5, Math.sin(a * 2) * 0.6, Math.sin(a) * 10.5);
+
+      scene.add(group);
+      motes.push({ group, disc, status: item.status });
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-
-    // soft-edged sprites read ~half the size of solid squares — compensate,
-    // and keep small boards extra prominent so the first item is unmissable
-    const moteSize = n <= 2 ? 1.5 : n <= 5 ? 1.2 : 0.95;
-
-    boardPoints = new THREE.Points(
-      geometry,
-      new THREE.PointsMaterial({
-        size: moteSize,
-        map: moteTexture,
-        vertexColors: true,
-        transparent: true,
-        opacity: 1,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      })
-    );
-    scene.add(boardPoints);
   }
 
   /* ---------- camera control: drag orbit + wheel zoom + idle drift ---------- */
@@ -407,19 +435,18 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
       node.cloud.scale.setScalar(pulse);
     }
 
-    // board ring — slow orbit around the core, clear of its glow; "doing" motes shimmer
-    if (boardPoints) {
-      const n = boardStatuses.length;
-      const attr = boardPoints.geometry.attributes.position as THREE.BufferAttribute;
+    // board motes — slow orbit around the core; "doing" discs pulse
+    if (motes.length > 0) {
+      const n = motes.length;
       const spin = REDUCED ? 0 : t * 0.12;
       for (let i = 0; i < n; i++) {
+        const m = motes[i];
         const a = spin + (i / n) * Math.PI * 2;
-        const doing = boardStatuses[i] === "doing";
-        const wobble = doing && !REDUCED ? Math.sin(t * 5 + i) * 0.35 : 0;
-        const r = 10.5 + wobble * 0.3;
-        attr.setXYZ(i, Math.cos(a) * r, Math.sin(a * 2 + t * 0.3) * 0.7 + wobble, Math.sin(a) * r);
+        m.group.position.set(Math.cos(a) * 10.5, Math.sin(a * 2 + t * 0.3) * 0.7, Math.sin(a) * 10.5);
+        if (m.status === "doing" && !REDUCED) {
+          m.disc.scale.setScalar(1.9 * (1 + Math.sin(t * 5 + i) * 0.14));
+        }
       }
-      attr.needsUpdate = true;
     }
 
     // beams
