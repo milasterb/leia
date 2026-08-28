@@ -32,10 +32,15 @@ import { tryAcquire, release } from "./limits.js";
 import { summary as usageSummary } from "./usage.js";
 
 const app = express();
-app.use(express.json({ limit: "32kb" }));
 
+// CORS MUST come before express.json(): if a request body exceeds the size
+// limit below, body-parsing throws before reaching later middleware — with
+// cors() registered after json(), that error response would go out with no
+// Access-Control-Allow-Origin header, and the browser would surface it to
+// the caller as an opaque "Failed to fetch" instead of a readable 413.
 const allowed = (process.env.WEB_ORIGIN ?? "*").split(",").map((s) => s.trim());
 app.use(cors({ origin: allowed.includes("*") ? true : allowed }));
+app.use(express.json({ limit: "32kb" }));
 
 const MAX_TASK_CHARS = 4000;
 const TASK_HARD_TIMEOUT_MS = 150_000;
@@ -356,6 +361,21 @@ app.post("/api/recall", (req, res) => {
       summary: e.summary,
     })),
   });
+});
+
+// Body-parser errors (bad JSON, payload over the size limit) land here
+// instead of Express's default HTML error page — every other endpoint
+// returns { error: "..." }, so this one should too.
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) return next(err);
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "Request body too large (max 32kb)." });
+  }
+  if (err?.type === "entity.parse.failed" || err instanceof SyntaxError) {
+    return res.status(400).json({ error: "Malformed JSON in request body." });
+  }
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Internal server error." });
 });
 
 const port = Number(process.env.PORT ?? 8787);
