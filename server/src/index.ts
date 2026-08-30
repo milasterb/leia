@@ -150,7 +150,7 @@ async function runFreeformTask(
       sessionId,
       viaClean,
       tool ?? (target ? "ask_companion" : "delegate_task"),
-      target ? `asked ${target} directly` : "delegated a task to the team"
+      target ? `asked ${echoId(String(target))} directly` : "delegated a task to the team"
     );
     publish(sessionId, { type: "task", taskId, via: viaClean, task: cleanTask });
 
@@ -159,9 +159,10 @@ async function runFreeformTask(
     if (target) {
       const member = findMember(String(target));
       if (!member) {
-        publish(sessionId, { type: "task-error", taskId, message: `No companion named "${target}".` });
+        const shownTarget = echoId(String(target));
+        publish(sessionId, { type: "task-error", taskId, message: `No companion named "${shownTarget}".` });
         return res.status(404).json({
-          error: `No companion named "${target}". Use list_companions to see the roster.`,
+          error: `No companion named "${shownTarget}". Use list_companions to see the roster.`,
         });
       }
       companion = member.name;
@@ -231,7 +232,7 @@ app.post("/api/task", async (req, res) => {
       sessionId,
       viaClean,
       tool ?? (targetClean ? "ask_companion" : "delegate_task"),
-      targetClean ? `proposed asking ${targetClean} directly` : "proposed a task for the team"
+      targetClean ? `proposed asking ${echoId(targetClean)} directly` : "proposed a task for the team"
     );
     publish(sessionId, { type: "pending", taskId, kind: "freeform", task: cleanTask, target: targetClean });
     return res.json({ taskId, status: "pending", message: "Waiting for human approval before this runs." });
@@ -288,7 +289,7 @@ app.post("/api/board", (req, res) => {
     if (typeof id !== "string") return res.status(400).json({ error: "id required" });
     result = removeBoardItem(sessionId, id);
   } else {
-    return res.status(400).json({ error: `Unknown action "${action}". Use add, update or remove.` });
+    return res.status(400).json({ error: `Unknown action "${echoId(String(action))}". Use add, update or remove.` });
   }
 
   // ping AFTER the mutation is confirmed to have actually happened — an
