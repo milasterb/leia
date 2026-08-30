@@ -36,7 +36,16 @@ function buildSystemPrompt(member: TeamMember, sessionId: string): string {
     `(what already happened in this session):\n${workspace}\n\n` +
     `Answer in English unless the task itself is written in another language — ` +
     `then answer in that language. Keep answers focused; this is a live ` +
-    `demo, not a dissertation.`
+    `demo, not a dissertation.\n\n` +
+    `When you write out a COMPLETE file's worth of code (not a short inline ` +
+    `snippet) — a full HTML page, a full CSS or JS file, a full config — open ` +
+    `its code fence with the actual filename instead of just the language, ` +
+    'e.g. ```index.html or ```styles.css rather than ```html or ```css. ' +
+    `The page turns each fenced block into a downloadable file using exactly ` +
+    `what you put after the backticks, so a real filename there means the ` +
+    `person gets a working file instead of having to rename it themselves. ` +
+    `Short snippets meant to illustrate a point, not to be saved as-is, can ` +
+    `keep using a plain language label.`
   );
 }
 

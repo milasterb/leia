@@ -26,6 +26,7 @@ import {
 import { initScene, SceneHandle } from "./scene.js";
 import { registerWebMCP, TOOLS } from "./webmcp.js";
 import { renderMarkdown } from "./markdown.js";
+import { attachDownloadButtons } from "./downloads.js";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -130,6 +131,7 @@ function finishBubble(taskId: string, companion: string, result: string) {
   const live = liveBubbles.get(taskId);
   if (live) {
     live.bubble.innerHTML = renderMarkdown(result); // authoritative final text, formatted
+    attachDownloadButtons(live.bubble);
     liveBubbles.delete(taskId);
   } else {
     startCompanionBubble(taskId, companion);

@@ -22,6 +22,10 @@ export function renderMarkdown(raw: string): string {
       "ul", "ol", "li", "h1", "h2", "h3", "h4", "a", "hr",
       "table", "thead", "tbody", "tr", "th", "td",
     ],
-    ALLOWED_ATTR: ["href"],
+    // "class" is needed on <code> so we can read the fence language (e.g.
+    // "language-html") to build a downloadable file — it's inert from a
+    // security standpoint, values can't execute anything, and every other
+    // attribute stays blocked exactly as before.
+    ALLOWED_ATTR: ["href", "class"],
   });
 }
