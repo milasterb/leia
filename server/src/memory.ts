@@ -8,6 +8,17 @@
  * nothing is persisted to disk.
  */
 
+// A caller can pass an arbitrarily long/garbage id (there's no length cap
+// on the id field itself — it's just a lookup key). Without this, an error
+// message that echoes the id back verbatim would echo back whatever they
+// sent, unbounded — titles are capped at MAX_TITLE, but a bogus id isn't a
+// title and shouldn't get to be arbitrarily long just by riding along in
+// an error string.
+const MAX_ID_ECHO = 40;
+export function echoId(id: string): string {
+  return id.length > MAX_ID_ECHO ? id.slice(0, MAX_ID_ECHO) + "…" : id;
+}
+
 export interface WorkspaceEntry {
   ts: number;
   /** Who initiated the task. */
@@ -174,7 +185,7 @@ export function updateBoardItem(
 ): BoardItem | { error: string } {
   const ws = workspaces.get(sessionId);
   const item = ws?.board.find((b) => b.id === id);
-  if (!ws || !item) return { error: `No board item "${id}". Use list_board to see current ids.` };
+  if (!ws || !item) return { error: `No board item "${echoId(id)}". Use list_board to see current ids.` };
   ws.lastSeen = Date.now();
 
   if (patch.title !== undefined) {
@@ -195,10 +206,10 @@ export function updateBoardItem(
 
 export function removeBoardItem(sessionId: string, id: string): BoardItem | { error: string } {
   const ws = workspaces.get(sessionId);
-  if (!ws) return { error: `No board item "${id}".` };
+  if (!ws) return { error: `No board item "${echoId(id)}".` };
   ws.lastSeen = Date.now();
   const idx = ws.board.findIndex((b) => b.id === id);
-  if (idx === -1) return { error: `No board item "${id}". Use list_board to see current ids.` };
+  if (idx === -1) return { error: `No board item "${echoId(id)}". Use list_board to see current ids.` };
   const [removed] = ws.board.splice(idx, 1);
   return removed;
 }

@@ -26,6 +26,7 @@ import {
   updateBoardItem,
   removeBoardItem,
   BoardStatus,
+  echoId,
 } from "./memory.js";
 import { publish, subscribe } from "./bus.js";
 import { tryAcquire, release } from "./limits.js";
@@ -383,7 +384,7 @@ app.post("/api/board/delegate", async (req, res) => {
 
   const item = listBoard(sessionId).find((b) => b.id === id);
   if (!item) {
-    return res.status(404).json({ error: `No board item "${id}". Use list_board to see current ids.` });
+    return res.status(404).json({ error: `No board item "${echoId(id)}". Use list_board to see current ids.` });
   }
   // an item already running or already waiting on a human stays untouched
   // — without this, two quick clicks (or a human and an agent both
@@ -391,7 +392,7 @@ app.post("/api/board/delegate", async (req, res) => {
   // same piece of work and race on the write
   if (item.status === "doing" || item.status === "pending") {
     const state = item.status === "pending" ? "waiting for approval" : "already being worked on";
-    return res.status(409).json({ error: `[${id}] "${item.title}" is ${state}.` });
+    return res.status(409).json({ error: `[${echoId(id)}] "${item.title}" is ${state}.` });
   }
 
   if (viaClean === "agent") {
