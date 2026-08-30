@@ -27,7 +27,17 @@ export interface RunTaskInput {
 
 function buildSystemPrompt(member: TeamMember, sessionId: string): string {
   const workspace = digest(sessionId);
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
   return (
+    `Today's real date is ${today} (UTC) — trust this over any date your ` +
+    `training data might suggest, and use it for anything date-relative ` +
+    `("next week", "this year", "how long ago").\n\n` +
     `You are ${member.name}, a specialist on ${ORCHESTRATOR_NAME}'s team. ` +
     `Role: ${member.role}.\n\n` +
     `${member.personality}\n\n` +
