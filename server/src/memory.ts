@@ -24,7 +24,7 @@ export interface WorkspaceEntry {
  * the agent both create, move and resolve through the same operations.
  * No model call is involved in a board mutation; this is plain state.
  */
-export type BoardStatus = "todo" | "doing" | "done";
+export type BoardStatus = "todo" | "pending" | "doing" | "done";
 
 export interface BoardItem {
   id: string;
@@ -184,7 +184,7 @@ export function updateBoardItem(
   }
   if (patch.note !== undefined) item.note = patch.note.trim().slice(0, MAX_NOTE);
   if (patch.status !== undefined) {
-    if (!["todo", "doing", "done"].includes(patch.status)) {
+    if (!["todo", "pending", "doing", "done"].includes(patch.status)) {
       return { error: `Invalid status "${patch.status}". Use todo, doing or done.` };
     }
     item.status = patch.status;

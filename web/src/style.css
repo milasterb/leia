@@ -17,6 +17,7 @@
   --leia-deep: #d9ae62;
   --danger: #ff7d9c;
   --ok: #35e0c4;
+  --pending: #ff9d47;
   --radius: 14px;
   --font-display: "Fraunces", serif;
   --font-body: "Outfit", system-ui, sans-serif;
@@ -202,6 +203,18 @@ html, body {
   animation: chip-pulse 1.2s ease-in-out infinite;
   --c: var(--leia);
 }
+.board-item[data-status="pending"] .board-status {
+  border-color: var(--pending);
+  background: rgba(255, 157, 71, 0.18);
+  animation: pending-pulse 1.6s ease-in-out infinite;
+  cursor: default;
+}
+@keyframes pending-pulse {
+  0%, 100% { box-shadow: 0 0 5px 0 rgba(255, 157, 71, 0.5); }
+  50% { box-shadow: 0 0 12px 2px rgba(255, 157, 71, 0.8); }
+}
+.board-item[data-status="pending"] { border-color: rgba(255, 157, 71, 0.3); }
+.board-item[data-status="pending"] .board-item-title { color: var(--pending); }
 .board-item[data-status="done"] .board-status {
   border-color: var(--ok);
   background: var(--ok);
@@ -254,6 +267,7 @@ html, body {
   gap: 3px;
 }
 .board-item:hover .board-actions { display: flex; }
+.board-actions.pending-actions { display: flex; } /* always visible — this needs a decision, not a hover discovery */
 .board-actions button {
   background: none;
   border: 1px solid var(--line);
@@ -267,6 +281,10 @@ html, body {
 }
 .board-actions button:hover { color: var(--leia); border-color: var(--leia-deep); }
 .board-actions button:disabled { opacity: 0.4; cursor: default; }
+.pending-actions .approve { color: var(--ok); border-color: rgba(53, 224, 196, 0.35); }
+.pending-actions .approve:hover { color: var(--ok); border-color: var(--ok); }
+.pending-actions .reject { color: var(--danger); border-color: rgba(255, 125, 156, 0.35); }
+.pending-actions .reject:hover { color: var(--danger); border-color: var(--danger); }
 
 #board-composer {
   display: flex;
@@ -439,6 +457,38 @@ html, body {
   color: var(--faint);
 }
 .msg.err .bubble { border-color: rgba(255, 125, 156, 0.4); color: var(--danger); }
+
+.msg.pending .who { color: var(--pending); }
+.msg.pending .bubble {
+  border: 1px solid rgba(255, 157, 71, 0.35);
+  background: rgba(255, 157, 71, 0.06);
+  white-space: pre-wrap;
+}
+.pending-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+.pending-controls button {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: filter 120ms ease;
+}
+.pending-controls button:hover { filter: brightness(1.12); }
+.pending-controls button:disabled { opacity: 0.45; cursor: default; }
+.pending-controls .approve { background: rgba(53, 224, 196, 0.16); border-color: rgba(53, 224, 196, 0.4); color: var(--ok); }
+.pending-controls .reject { background: rgba(255, 125, 156, 0.14); border-color: rgba(255, 125, 156, 0.4); color: var(--danger); }
+.pending-note {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
 
 .agent-call {
   font-family: var(--font-mono);

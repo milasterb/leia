@@ -98,9 +98,9 @@ Built and pressure-tested past the happy path, since this runs a real, paid API 
 - **A board item can't be double-delegated** — concurrent or repeated delegation on the same item is rejected instead of silently paying for the same work twice
 - **The live event stream self-heals** — if a connection goes quiet (some proxies drop idle connections without ever erroring), the client detects the silence and reconnects on its own
 
-## Lineage
+## Background
 
-Leia is a standalone, public-safe spinoff of **Themis**, my personal multi-agent AI operating system that runs 24/7 on a Raspberry Pi at home. The companion-team concept, the two-tier routing design and the particle-world aesthetic come from Themis; the code here was written fresh for this challenge so the demo carries none of the private system's infrastructure, data or configuration. The home system's vector memory and message bus are deliberately replaced by session-scoped in-process equivalents.
+Leia was designed and built from scratch for this challenge — the repository, the architecture, and every line of code here are new. The companion-team concept, the two-tier routing design, and the particle-world aesthetic draw on my own experience building multi-agent AI systems and real-time 3D interfaces, but none of that prior experience takes the form of code reused here.
 
 ## AI assistance
 

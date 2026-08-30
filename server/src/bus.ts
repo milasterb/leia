@@ -23,7 +23,21 @@ export type BusEvent =
       type: "board";
       items: BoardItem[];
       changed?: { id: string; action: "add" | "update" | "remove"; via: "human" | "agent"; title: string };
-    };
+    }
+  | {
+      // agent-initiated work that needs a human's go-ahead before it runs.
+      // "board" pending items show their Approve/Reject controls on the
+      // board card itself; "freeform" ones (delegate_task/ask_companion,
+      // not tied to any board item) show them inline in the feed, since
+      // the feed is the only place that request is visible at all.
+      type: "pending";
+      taskId: string;
+      kind: "board" | "freeform";
+      task: string;
+      boardId?: string;
+      target?: string;
+    }
+  | { type: "pending-resolved"; taskId: string; decision: "approved" | "rejected" | "expired" };
 
 type Listener = (e: BusEvent) => void;
 

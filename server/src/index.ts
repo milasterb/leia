@@ -30,6 +30,7 @@ import {
 import { publish, subscribe } from "./bus.js";
 import { tryAcquire, release } from "./limits.js";
 import { summary as usageSummary } from "./usage.js";
+import { addPending, getPending, removePending, sweepExpired } from "./approvals.js";
 
 const app = express();
 
@@ -127,25 +128,21 @@ app.get("/api/stream", (req, res) => {
   });
 });
 
-app.post("/api/task", async (req, res) => {
-  const { sessionId, task, via, target, tool } = req.body ?? {};
-
-  if (typeof sessionId !== "string" || !sessionId) {
-    return res.status(400).json({ error: "sessionId required" });
-  }
-  if (typeof task !== "string" || !task.trim()) {
-    return res.status(400).json({ error: "task required" });
-  }
-  if (task.length > MAX_TASK_CHARS) {
-    return res.status(400).json({ error: `task too long (max ${MAX_TASK_CHARS} chars)` });
-  }
-  const viaClean: "human" | "agent" = via === "agent" ? "agent" : "human";
+/**
+ * Runs a free-form task (delegate_task / ask_companion) right now — paid
+ * API call included. Called directly for human-initiated requests (they're
+ * watching, no gate needed) and again from /api/approve once a human has
+ * signed off on an agent-proposed one.
+ */
+async function runFreeformTask(
+  res: express.Response,
+  sessionId: string,
+  params: { taskId: string; task: string; target?: string; via: "human" | "agent"; tool?: unknown }
+) {
+  const { taskId, task: cleanTask, target, via: viaClean, tool } = params;
 
   const gate = tryAcquire(sessionId);
   if (!gate.ok) return res.status(429).json({ error: gate.reason });
-
-  const taskId = randomUUID();
-  const cleanTask = task.trim();
 
   try {
     agentPing(
@@ -197,6 +194,49 @@ app.post("/api/task", async (req, res) => {
     markFree(sessionId, taskId);
     release(sessionId);
   }
+}
+
+app.post("/api/task", async (req, res) => {
+  const { sessionId, task, via, target, tool } = req.body ?? {};
+
+  if (typeof sessionId !== "string" || !sessionId) {
+    return res.status(400).json({ error: "sessionId required" });
+  }
+  if (typeof task !== "string" || !task.trim()) {
+    return res.status(400).json({ error: "task required" });
+  }
+  if (task.length > MAX_TASK_CHARS) {
+    return res.status(400).json({ error: `task too long (max ${MAX_TASK_CHARS} chars)` });
+  }
+  const viaClean: "human" | "agent" = via === "agent" ? "agent" : "human";
+  const cleanTask = task.trim();
+  const targetClean = typeof target === "string" && target ? target : undefined;
+
+  // Agent-initiated work costs real money and can run unattended, so it
+  // waits for a human's go-ahead. Human-initiated work runs immediately —
+  // a person clicking Send is already watching it happen.
+  if (viaClean === "agent") {
+    const taskId = randomUUID();
+    addPending({
+      taskId,
+      sessionId,
+      kind: "freeform",
+      taskText: cleanTask,
+      target: targetClean,
+      tool: typeof tool === "string" ? tool : undefined,
+      createdAt: Date.now(),
+    });
+    agentPing(
+      sessionId,
+      viaClean,
+      tool ?? (targetClean ? "ask_companion" : "delegate_task"),
+      targetClean ? `proposed asking ${targetClean} directly` : "proposed a task for the team"
+    );
+    publish(sessionId, { type: "pending", taskId, kind: "freeform", task: cleanTask, target: targetClean });
+    return res.json({ taskId, status: "pending", message: "Waiting for human approval before this runs." });
+  }
+
+  await runFreeformTask(res, sessionId, { taskId: randomUUID(), task: cleanTask, target: targetClean, via: viaClean, tool });
 });
 
 /* ---------------- board: real shared state, no model in the loop ---------------- */
@@ -233,6 +273,11 @@ app.post("/api/board", (req, res) => {
     });
   } else if (action === "update") {
     if (typeof id !== "string") return res.status(400).json({ error: "id required" });
+    if (status === "pending") {
+      return res.status(400).json({
+        error: '"pending" can\'t be set directly — it\'s applied automatically when an agent proposes delegating this item, and cleared when a human approves or rejects it.',
+      });
+    }
     result = updateBoardItem(sessionId, id, {
       title: typeof title === "string" ? title : undefined,
       note: typeof note === "string" ? note : undefined,
@@ -268,40 +313,24 @@ app.post("/api/board", (req, res) => {
 });
 
 /**
- * The bridge: send a board item through the team. Marks it "doing",
- * routes it like any task, and when the companion finishes, files the
- * outcome back into the item and marks it "done". Real state in, real
- * state out — the model only does the work in the middle.
+ * Runs a board item's delegation right now. Called directly for human
+ * clicks (⚡ button) and again from /api/approve once a human has signed
+ * off on an agent-proposed delegation.
  */
-app.post("/api/board/delegate", async (req, res) => {
-  const { sessionId, id, via, tool } = req.body ?? {};
-  if (typeof sessionId !== "string" || !sessionId) {
-    return res.status(400).json({ error: "sessionId required" });
-  }
-  if (typeof id !== "string" || !id) return res.status(400).json({ error: "id required" });
-  const viaClean: "human" | "agent" = via === "agent" ? "agent" : "human";
-
-  const item = listBoard(sessionId).find((b) => b.id === id);
-  if (!item) {
-    return res.status(404).json({ error: `No board item "${id}". Use list_board to see current ids.` });
-  }
-  // an item already being worked stays untouched — without this, two quick
-  // clicks (or a human and an agent both reaching for the same item) would
-  // fire two paid API calls for the same piece of work and race on the write
-  if (item.status === "doing") {
-    return res.status(409).json({
-      error: `[${id}] "${item.title}" is already being worked on. Wait for it to finish before delegating again.`,
-    });
-  }
+async function runBoardDelegateTask(
+  res: express.Response,
+  sessionId: string,
+  params: { taskId: string; id: string; item: { title: string; note: string }; via: "human" | "agent"; tool?: unknown }
+) {
+  const { taskId, id, item, via: viaClean, tool } = params;
 
   const gate = tryAcquire(sessionId);
   if (!gate.ok) return res.status(429).json({ error: gate.reason });
 
-  const taskId = randomUUID();
   const taskText = item.note ? `${item.title}\n\nContext note on the board item: ${item.note}` : item.title;
 
   try {
-    agentPing(sessionId, viaClean, tool ?? "delegate_board_item", `sent ${id} "${item.title.slice(0, 50)}" to the team`);
+    agentPing(sessionId, viaClean, tool ?? "delegate_board_item", `sent [${id}] "${item.title.slice(0, 50)}" to the team`);
     publish(sessionId, { type: "task", taskId, via: viaClean, task: `[board ${id}] ${item.title}` });
 
     const toDoing = updateBoardItem(sessionId, id, { status: "doing" });
@@ -342,7 +371,112 @@ app.post("/api/board/delegate", async (req, res) => {
     markFree(sessionId, taskId);
     release(sessionId);
   }
+}
+
+app.post("/api/board/delegate", async (req, res) => {
+  const { sessionId, id, via, tool } = req.body ?? {};
+  if (typeof sessionId !== "string" || !sessionId) {
+    return res.status(400).json({ error: "sessionId required" });
+  }
+  if (typeof id !== "string" || !id) return res.status(400).json({ error: "id required" });
+  const viaClean: "human" | "agent" = via === "agent" ? "agent" : "human";
+
+  const item = listBoard(sessionId).find((b) => b.id === id);
+  if (!item) {
+    return res.status(404).json({ error: `No board item "${id}". Use list_board to see current ids.` });
+  }
+  // an item already running or already waiting on a human stays untouched
+  // — without this, two quick clicks (or a human and an agent both
+  // reaching for the same item) would fire two paid API calls for the
+  // same piece of work and race on the write
+  if (item.status === "doing" || item.status === "pending") {
+    const state = item.status === "pending" ? "waiting for approval" : "already being worked on";
+    return res.status(409).json({ error: `[${id}] "${item.title}" is ${state}.` });
+  }
+
+  if (viaClean === "agent") {
+    const taskId = randomUUID();
+    addPending({
+      taskId,
+      sessionId,
+      kind: "board",
+      boardId: id,
+      taskText: item.note ? `${item.title}\n\nContext note on the board item: ${item.note}` : item.title,
+      tool: typeof tool === "string" ? tool : undefined,
+      createdAt: Date.now(),
+    });
+    const toPending = updateBoardItem(sessionId, id, { status: "pending" });
+    if (!("error" in toPending)) broadcastBoard(sessionId, { id, action: "update", via: viaClean, title: item.title });
+    agentPing(sessionId, viaClean, tool ?? "delegate_board_item", `proposed sending [${id}] "${item.title.slice(0, 50)}" to the team`);
+    publish(sessionId, { type: "pending", taskId, kind: "board", boardId: id, task: item.title });
+    return res.json({ taskId, id, status: "pending", message: "Waiting for human approval before this runs." });
+  }
+
+  await runBoardDelegateTask(res, sessionId, { taskId: randomUUID(), id, item, via: viaClean, tool });
 });
+
+/**
+ * The only way a pending, agent-proposed task actually runs. Deliberately
+ * NOT exposed as a WebMCP tool anywhere in the frontend — an agent can
+ * propose work through delegate_task/ask_companion/delegate_board_item,
+ * but only a human clicking Approve in the page's own UI can wave it
+ * through. This is what makes the approval real rather than decorative.
+ */
+app.post("/api/approve", async (req, res) => {
+  const { sessionId, taskId, decision } = req.body ?? {};
+  if (typeof sessionId !== "string" || !sessionId) {
+    return res.status(400).json({ error: "sessionId required" });
+  }
+  if (typeof taskId !== "string" || !taskId) {
+    return res.status(400).json({ error: "taskId required" });
+  }
+  if (decision !== "approve" && decision !== "reject") {
+    return res.status(400).json({ error: 'decision must be "approve" or "reject"' });
+  }
+
+  const approval = getPending(taskId);
+  if (!approval || approval.sessionId !== sessionId) {
+    return res.status(404).json({ error: "No pending approval with that id for this session." });
+  }
+  removePending(taskId);
+
+  if (decision === "reject") {
+    if (approval.kind === "board" && approval.boardId) {
+      const back = updateBoardItem(sessionId, approval.boardId, { status: "todo" });
+      if (!("error" in back)) {
+        broadcastBoard(sessionId, { id: approval.boardId, action: "update", via: "human", title: back.title });
+      }
+    }
+    publish(sessionId, { type: "pending-resolved", taskId, decision: "rejected" });
+    return res.json({ taskId, decision: "rejected" });
+  }
+
+  publish(sessionId, { type: "pending-resolved", taskId, decision: "approved" });
+
+  if (approval.kind === "board" && approval.boardId) {
+    const item = listBoard(sessionId).find((b) => b.id === approval.boardId);
+    if (!item) return res.status(404).json({ error: "The board item no longer exists." });
+    return runBoardDelegateTask(res, sessionId, { taskId, id: approval.boardId, item, via: "agent", tool: approval.tool });
+  }
+
+  await runFreeformTask(res, sessionId, { taskId, task: approval.taskText, target: approval.target, via: "agent", tool: approval.tool });
+});
+
+// Approvals nobody acted on eventually auto-reject, so a proposal an agent
+// made and then abandoned doesn't leave a board item stuck on "pending"
+// forever, or leave the human wondering if it's still waiting on them.
+setInterval(() => {
+  for (const approval of sweepExpired()) {
+    removePending(approval.taskId);
+    if (approval.kind === "board" && approval.boardId) {
+      const back = updateBoardItem(approval.sessionId, approval.boardId, { status: "todo" });
+      if (!("error" in back)) {
+        broadcastBoard(approval.sessionId, { id: approval.boardId, action: "update", via: "human", title: back.title });
+      }
+    }
+    publish(approval.sessionId, { type: "pending-resolved", taskId: approval.taskId, decision: "expired" });
+  }
+}, 30_000).unref();
 
 app.post("/api/recall", (req, res) => {
   const { sessionId, query, via, tool } = req.body ?? {};

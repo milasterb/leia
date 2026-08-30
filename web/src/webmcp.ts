@@ -11,7 +11,7 @@
  * If neither exists we surface how to enable it instead of failing quietly.
  */
 
-import { submitTask, recallMemory, fetchStatus, fetchTeam, fetchBoard, mutateBoard, delegateBoardItem } from "./api.js";
+import { submitTask, recallMemory, fetchStatus, fetchTeam, fetchBoard, mutateBoard, delegateBoardItem, isPending } from "./api.js";
 
 type ToolResult = { content: { type: "text"; text: string }[] };
 
@@ -37,7 +37,10 @@ export const TOOLS: WebMCPTool[] = [
     description:
       "Give a task to Leia's team of AI specialists. Leia (the orchestrator) picks the best-suited " +
       "companion, that companion does the work, and you get the result plus who handled it. " +
-      "Use this when you don't know or don't care which specialist should do the job.",
+      "Use this when you don't know or don't care which specialist should do the job. " +
+      "Note: this costs real money on a real API key, so it doesn't run immediately — it waits " +
+      "for the human using this page to approve it. You'll get back a \"pending\" response, not " +
+      "the result; check get_team_status later to see if it ran.",
     inputSchema: {
       type: "object",
       properties: {
@@ -51,6 +54,7 @@ export const TOOLS: WebMCPTool[] = [
     execute: async ({ task }: { task: string }) => {
       try {
         const r = await submitTask({ task, via: "agent", tool: "delegate_task" });
+        if (isPending(r)) return text(r.message);
         return text(`${r.companion} handled this (routing: ${r.how}).\n\n${r.result}`);
       } catch (e) {
         return err(e);
@@ -63,7 +67,10 @@ export const TOOLS: WebMCPTool[] = [
       "Ask one specific companion directly, bypassing Leia's routing. Companions: Smith (code), " +
       "Scout (research with live web search), Keeper (session context & memory), Scribe (writing), " +
       "Planner (plans & estimates), Warden (critical review), Analyst (numbers & data). " +
-      "Use list_companions for full roles.",
+      "Use list_companions for full roles. " +
+      "Note: this costs real money on a real API key, so it doesn't run immediately — it waits " +
+      "for the human using this page to approve it. You'll get back a \"pending\" response, not " +
+      "the answer; check get_team_status later to see if it ran.",
     inputSchema: {
       type: "object",
       properties: {
@@ -81,6 +88,7 @@ export const TOOLS: WebMCPTool[] = [
     execute: async ({ companion, question }: { companion: string; question: string }) => {
       try {
         const r = await submitTask({ task: question, via: "agent", target: companion, tool: "ask_companion" });
+        if (isPending(r)) return text(r.message);
         return text(`${r.companion} answers:\n\n${r.result}`);
       } catch (e) {
         return err(e);
@@ -258,10 +266,13 @@ export const TOOLS: WebMCPTool[] = [
   {
     name: "delegate_board_item",
     description:
-      "Send one board item to Leia's team to actually get done: the item flips to \"doing\", Leia " +
-      "routes it to the right specialist, and when they finish the item flips to \"done\" with the " +
-      "outcome attached as its note. The human watches all of it happen live. This is the bridge " +
-      "between the shared plan (board) and the team doing the work.",
+      "Send one board item to Leia's team to actually get done: the item moves to \"pending\", a " +
+      "human approves it, then Leia routes it to the right specialist, and when they finish the " +
+      "item flips to \"done\" with the outcome attached as its note. The human watches all of it " +
+      "happen live. This is the bridge between the shared plan (board) and the team doing the work. " +
+      "Note: this costs real money, so it does NOT run immediately — it waits for the human's " +
+      "approval first. You'll get back a \"pending\" response; check list_board later to see if " +
+      "it was approved and completed.",
     inputSchema: {
       type: "object",
       properties: {
@@ -272,6 +283,7 @@ export const TOOLS: WebMCPTool[] = [
     execute: async ({ id }: { id: string }) => {
       try {
         const r = await delegateBoardItem(id, "agent", "delegate_board_item");
+        if (isPending(r)) return text(r.message);
         return text(`[${r.id}] handled by ${r.companion} and marked done.\n\n${r.result}`);
       } catch (e) {
         return err(e);

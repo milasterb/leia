@@ -45,12 +45,22 @@ export interface TaskResponse {
   result: string;
 }
 
+export interface PendingResponse {
+  taskId: string;
+  status: "pending";
+  message: string;
+}
+
+export function isPending(data: any): data is PendingResponse {
+  return data?.status === "pending";
+}
+
 export async function submitTask(input: {
   task: string;
   via: "human" | "agent";
   target?: string;
   tool?: string;
-}): Promise<TaskResponse> {
+}): Promise<TaskResponse | PendingResponse> {
   const res = await fetch(`${API_BASE}/api/task`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -59,7 +69,7 @@ export async function submitTask(input: {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `task failed (${res.status})`);
-  return data as TaskResponse;
+  return isPending(data) ? data : (data as TaskResponse);
 }
 
 export async function recallMemory(query: string, via: "human" | "agent" = "human") {
@@ -91,7 +101,7 @@ export async function fetchStatus(opts?: { via?: "agent"; tool?: string }) {
   };
 }
 
-export type BoardStatus = "todo" | "doing" | "done";
+export type BoardStatus = "todo" | "pending" | "doing" | "done";
 
 export interface BoardItem {
   id: string;
@@ -138,7 +148,7 @@ export async function delegateBoardItem(
   id: string,
   via: "human" | "agent",
   tool?: string
-): Promise<TaskResponse & { id: string }> {
+): Promise<(TaskResponse & { id: string }) | (PendingResponse & { id: string })> {
   const res = await fetch(`${API_BASE}/api/board/delegate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -147,7 +157,19 @@ export async function delegateBoardItem(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `delegate failed (${res.status})`);
-  return data as TaskResponse & { id: string };
+  return isPending(data) ? { ...data, id } : (data as TaskResponse & { id: string });
+}
+
+export async function approveTask(taskId: string, decision: "approve" | "reject") {
+  const res = await fetch(`${API_BASE}/api/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: sessionId(), taskId, decision }),
+    signal: AbortSignal.timeout(160_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `${decision} failed (${res.status})`);
+  return data;
 }
 
 export interface UsageSummary {
@@ -176,7 +198,9 @@ export type StreamEvent =
       type: "board";
       items: BoardItem[];
       changed?: { id: string; action: "add" | "update" | "remove"; via: "human" | "agent"; title: string };
-    };
+    }
+  | { type: "pending"; taskId: string; kind: "board" | "freeform"; task: string; boardId?: string; target?: string }
+  | { type: "pending-resolved"; taskId: string; decision: "approved" | "rejected" | "expired" };
 
 export function openStream(
   onEvent: (e: StreamEvent) => void,

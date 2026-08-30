@@ -247,6 +247,7 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
   /* ---------- board: one solid glowing disc per item, orbiting the core ---------- */
   const BOARD_COLORS: Record<string, number> = {
     todo: 0xbfb6ea,
+    pending: 0xff9d47,
     doing: 0xf5d9a8,
     done: 0x35e0c4,
   };
@@ -445,6 +446,8 @@ export function initScene(canvas: HTMLCanvasElement, team: TeamMemberInfo[]): Sc
         m.group.position.set(Math.cos(a) * 10.5, Math.sin(a * 2 + t * 0.3) * 0.7, Math.sin(a) * 10.5);
         if (m.status === "doing" && !REDUCED) {
           m.disc.scale.setScalar(1.9 * (1 + Math.sin(t * 5 + i) * 0.14));
+        } else if (m.status === "pending" && !REDUCED) {
+          m.disc.scale.setScalar(1.9 * (1 + Math.sin(t * 2.2 + i) * 0.1));
         }
       }
     }

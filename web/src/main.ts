@@ -14,6 +14,7 @@ import {
   fetchBoard,
   mutateBoard,
   delegateBoardItem,
+  approveTask,
   fetchUsage,
   openStream,
   submitTask,
@@ -170,6 +171,62 @@ const NEXT_STATUS: Record<string, "todo" | "doing" | "done"> = {
   done: "todo",
 };
 
+/* ---------------- human-in-the-loop: agent proposals waiting on a person ---------------- */
+
+interface PendingInfo {
+  kind: "board" | "freeform";
+  boardId?: string;
+  task: string;
+  target?: string;
+  feedEl?: HTMLElement;
+}
+const pendingApprovals = new Map<string, PendingInfo>(); // taskId -> info
+
+function pendingTaskIdFor(boardId: string): string {
+  for (const [taskId, p] of pendingApprovals) if (p.boardId === boardId) return taskId;
+  return "";
+}
+
+function addPendingBubble(taskId: string, task: string, target?: string) {
+  ensureNotEmpty();
+  const el = document.createElement("div");
+  el.className = "msg pending";
+  const who = target ? `wants to ask ${target} directly` : "wants to delegate this to the team";
+  el.innerHTML = `
+    <div class="who">your agent · proposal</div>
+    <div class="bubble"></div>
+    <div class="pending-controls">
+      <button class="approve">✓ Approve</button>
+      <button class="reject">✗ Reject</button>
+    </div>`;
+  el.querySelector(".bubble")!.textContent = `${who}:\n"${task}"`;
+  const approveBtn = el.querySelector(".approve") as HTMLButtonElement;
+  const rejectBtn = el.querySelector(".reject") as HTMLButtonElement;
+  approveBtn.addEventListener("click", () => {
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    approveTask(taskId, "approve").catch((e) => addError("local", e instanceof Error ? e.message : "Approve failed."));
+  });
+  rejectBtn.addEventListener("click", () => {
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    approveTask(taskId, "reject").catch((e) => addError("local", e instanceof Error ? e.message : "Reject failed."));
+  });
+  feed.appendChild(el);
+  scrollFeed();
+  return el;
+}
+
+function resolvePendingBubble(el: HTMLElement, decision: "approved" | "rejected" | "expired") {
+  const controls = el.querySelector(".pending-controls");
+  controls?.remove();
+  const note = document.createElement("div");
+  note.className = "pending-note";
+  note.textContent =
+    decision === "approved" ? "→ approved, running now" : decision === "rejected" ? "→ rejected" : "→ expired (no response)";
+  el.appendChild(note);
+}
+
 function renderBoard(items: BoardItem[]) {
   boardCount.textContent = items.length
     ? `${items.filter((b) => b.status === "done").length}/${items.length} done`
@@ -195,15 +252,20 @@ function renderBoard(items: BoardItem[]) {
 
     const statusBtn = document.createElement("button");
     statusBtn.className = "board-status";
-    statusBtn.title =
-      item.status === "todo"
-        ? "todo — click to mark doing yourself (this also locks out delegating it to the team)"
-        : `${item.status} — click to move to ${NEXT_STATUS[item.status]}`;
-    statusBtn.addEventListener("click", () => {
-      mutateBoard({ action: "update", id: item.id, status: NEXT_STATUS[item.status], via: "human" }).catch((e) =>
-        addError("local", e instanceof Error ? e.message : "Board update failed.")
-      );
-    });
+    if (item.status === "pending") {
+      statusBtn.disabled = true;
+      statusBtn.title = "Your agent proposed this — waiting for your approval";
+    } else {
+      statusBtn.title =
+        item.status === "todo"
+          ? "todo — click to mark doing yourself (this also locks out delegating it to the team)"
+          : `${item.status} — click to move to ${NEXT_STATUS[item.status]}`;
+      statusBtn.addEventListener("click", () => {
+        mutateBoard({ action: "update", id: item.id, status: NEXT_STATUS[item.status], via: "human" }).catch((e) =>
+          addError("local", e instanceof Error ? e.message : "Board update failed.")
+        );
+      });
+    }
 
     const textWrap = document.createElement("div");
     textWrap.className = "board-text";
@@ -223,30 +285,59 @@ function renderBoard(items: BoardItem[]) {
     const actions = document.createElement("div");
     actions.className = "board-actions";
 
-    const runBtn = document.createElement("button");
-    runBtn.textContent = "⚡";
-    runBtn.disabled = item.status === "doing";
-    runBtn.title = runBtn.disabled
-      ? "Already marked doing — move it back to todo (click the status circle) to delegate it"
-      : "Send to the team (Leia routes it, outcome lands back on the item)";
-    runBtn.addEventListener("click", () => {
-      runBtn.disabled = true;
-      runBtn.title = "Sending…";
-      delegateBoardItem(item.id, "human").catch((e) =>
-        addError("local", e instanceof Error ? e.message : "Delegation failed.")
-      );
-    });
+    if (item.status === "pending") {
+      // this is the ONLY place a pending item can be waved through — no
+      // WebMCP tool can call this, only a human clicking here
+      actions.classList.add("pending-actions");
+      const approveBtn = document.createElement("button");
+      approveBtn.textContent = "✓";
+      approveBtn.className = "approve";
+      approveBtn.title = "Approve — let the team actually run this";
+      approveBtn.addEventListener("click", () => {
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        approveTask(pendingTaskIdFor(item.id), "approve").catch((e) =>
+          addError("local", e instanceof Error ? e.message : "Approve failed.")
+        );
+      });
+      const rejectBtn = document.createElement("button");
+      rejectBtn.textContent = "✗";
+      rejectBtn.className = "reject";
+      rejectBtn.title = "Reject — send it back to todo, nothing runs";
+      rejectBtn.addEventListener("click", () => {
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        approveTask(pendingTaskIdFor(item.id), "reject").catch((e) =>
+          addError("local", e instanceof Error ? e.message : "Reject failed.")
+        );
+      });
+      actions.append(approveBtn, rejectBtn);
+    } else {
+      const runBtn = document.createElement("button");
+      runBtn.textContent = "⚡";
+      runBtn.disabled = item.status === "doing";
+      runBtn.title = runBtn.disabled
+        ? "Already marked doing — move it back to todo (click the status circle) to delegate it"
+        : "Send to the team (Leia routes it, outcome lands back on the item)";
+      runBtn.addEventListener("click", () => {
+        runBtn.disabled = true;
+        runBtn.title = "Sending…";
+        delegateBoardItem(item.id, "human").catch((e) =>
+          addError("local", e instanceof Error ? e.message : "Delegation failed.")
+        );
+      });
 
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "×";
-    delBtn.title = "Remove from board";
-    delBtn.addEventListener("click", () => {
-      mutateBoard({ action: "remove", id: item.id, via: "human" }).catch((e) =>
-        addError("local", e instanceof Error ? e.message : "Remove failed.")
-      );
-    });
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "×";
+      delBtn.title = "Remove from board";
+      delBtn.addEventListener("click", () => {
+        mutateBoard({ action: "remove", id: item.id, via: "human" }).catch((e) =>
+          addError("local", e instanceof Error ? e.message : "Remove failed.")
+        );
+      });
 
-    actions.append(runBtn, delBtn);
+      actions.append(runBtn, delBtn);
+    }
 
     el.append(statusBtn, textWrap);
     if (item.createdBy === "agent") {
@@ -408,6 +499,22 @@ function handleEvent(e: StreamEvent) {
         addSystemLine(`⚑ ${who} ${verb} “${e.changed.title}” on the board`);
       }
       renderBoard(e.items);
+      break;
+    }
+    case "pending": {
+      if (e.kind === "board" && e.boardId) {
+        pendingApprovals.set(e.taskId, { kind: "board", boardId: e.boardId, task: e.task });
+        addSystemLine(`⏳ your agent proposed “${e.task}” — approve it on the board`);
+      } else {
+        const feedEl = addPendingBubble(e.taskId, e.task, e.target);
+        pendingApprovals.set(e.taskId, { kind: "freeform", task: e.task, target: e.target, feedEl });
+      }
+      break;
+    }
+    case "pending-resolved": {
+      const info = pendingApprovals.get(e.taskId);
+      if (info?.feedEl) resolvePendingBubble(info.feedEl, e.decision);
+      pendingApprovals.delete(e.taskId);
       break;
     }
   }
