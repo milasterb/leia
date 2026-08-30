@@ -14,7 +14,7 @@ import { record as recordUsage } from "./usage.js";
 const anthropic = new Anthropic();
 
 const COMPANION_MODEL = process.env.COMPANION_MODEL ?? "claude-sonnet-4-6";
-const MAX_TOKENS = Number(process.env.COMPANION_MAX_TOKENS ?? 1200);
+const MAX_TOKENS = Number(process.env.COMPANION_MAX_TOKENS ?? 5000);
 const WEB_SEARCH_MAX_USES = Number(process.env.WEB_SEARCH_MAX_USES ?? 3);
 
 export interface RunTaskInput {
