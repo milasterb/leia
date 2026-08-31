@@ -25,11 +25,18 @@ function sanitizeFilename(name: string): string {
   return flat.slice(0, MAX_FILENAME_LEN) || "file";
 }
 
-function filenameFor(langLabel: string, index: number): string {
+/**
+ * A fence labeled with a real filename (e.g. "index.html") is a complete
+ * file meant to be saved as-is — showing its full source in the chat is
+ * just something to scroll past to reach the download button. A fence
+ * labeled with a plain language (e.g. "js") is a short illustrative
+ * snippet meant to be read inline, so it stays visible.
+ */
+function filenameInfo(langLabel: string, index: number): { filename: string; isRealFile: boolean } {
   const label = langLabel.trim();
-  if (label.includes(".")) return sanitizeFilename(label); // author gave a real filename, e.g. "index.html"
+  if (label.includes(".")) return { filename: sanitizeFilename(label), isRealFile: true };
   const ext = EXT_BY_LANG[label.toLowerCase()] ?? "txt";
-  return sanitizeFilename(`snippet-${index + 1}.${ext}`);
+  return { filename: sanitizeFilename(`snippet-${index + 1}.${ext}`), isRealFile: false };
 }
 
 function triggerDownload(filename: string, blob: Blob) {
@@ -68,7 +75,7 @@ export function attachDownloadButtons(bubble: HTMLElement): void {
   blocks.forEach((code, i) => {
     const pre = code.parentElement as HTMLElement;
     const langMatch = code.className.match(/language-(\S+)/);
-    const filename = filenameFor(langMatch ? langMatch[1] : "", i);
+    const { filename, isRealFile } = filenameInfo(langMatch ? langMatch[1] : "", i);
     const content = code.textContent ?? "";
     files.push({ name: filename, content });
 
@@ -88,6 +95,23 @@ export function attachDownloadButtons(bubble: HTMLElement): void {
     });
 
     bar.append(nameSpan, btn);
+
+    if (isRealFile) {
+      // a complete file: no reason to make someone scroll past its own
+      // source just to reach the button that downloads that exact source
+      pre.style.display = "none";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "code-toggle-btn";
+      toggle.textContent = "Show code";
+      toggle.addEventListener("click", () => {
+        const hidden = pre.style.display === "none";
+        pre.style.display = hidden ? "" : "none";
+        toggle.textContent = hidden ? "Hide code" : "Show code";
+      });
+      bar.appendChild(toggle);
+    }
+
     pre.parentElement!.insertBefore(bar, pre);
   });
 

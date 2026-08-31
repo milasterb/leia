@@ -434,21 +434,18 @@ html, body {
 .code-download-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 8px;
-  margin: 10px 0 -4px;
-  padding: 5px 10px;
+  margin: 10px 0 8px;
+  padding: 7px 10px;
   background: rgba(245, 217, 168, 0.06);
   border: 1px solid rgba(217, 174, 98, 0.25);
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
-}
-.code-download-bar + pre {
-  margin-top: 0;
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
+  border-radius: 8px;
 }
 .code-filename {
+  flex: 1 1 auto;
+  min-width: 60px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--leia-deep);
@@ -470,6 +467,21 @@ html, body {
   transition: background 130ms ease;
 }
 .code-download-btn:hover { background: rgba(245, 217, 168, 0.22); }
+
+.code-toggle-btn {
+  flex: none;
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  color: var(--faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 3px 2px;
+  transition: color 130ms ease;
+}
+.code-toggle-btn:hover { color: var(--muted); }
 
 .code-download-all {
   margin-bottom: 11px;
